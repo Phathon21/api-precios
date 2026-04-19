@@ -6,17 +6,19 @@ import { Readable } from "stream";
 const app = express();
 app.use(express.json());
 
-// 🔗 NUEVO SHEET (FORMATO_PRO)
+// 🔗 TU SHEET NUEVO
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/1dvTJM6zRoc-zZMjEdWest2y0oofjYi9ZOmjKSi0ftDA/export?format=csv&gid=583618011";
 
 // 💰 CALCULAR PRECIO
 function calcularPrecio(base, esIphone) {
   base = Number(base);
+  if (!base || base <= 0) return null;
+
   if (esIphone) return (base + 10000) * 2 + 50000;
   return (base + 10000) * 2 + 20000;
 }
 
-// 📥 OBTENER DATOS
+// 📥 LEER SHEET
 async function obtenerDatos() {
   const res = await fetch(SHEET_URL);
   const text = await res.text();
@@ -32,9 +34,9 @@ async function obtenerDatos() {
   });
 }
 
-// 🔍 LIMPIAR TEXTO
+// 🧼 LIMPIAR TEXTO
 function limpiar(txt) {
-  return txt.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return (txt || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 // 🔍 DETECTAR MODELO
@@ -64,7 +66,7 @@ app.post("/precio", async (req, res) => {
       mensaje.includes("buen día")
     ) {
       return res.json({
-        respuesta: "👋 Hola! ¿En qué puedo ayudarte?"
+        respuesta: "👋 Hola! ¿En qué puedo ayudarte hoy? 😊"
       });
     }
 
@@ -72,56 +74,81 @@ app.post("/precio", async (req, res) => {
     if (mensaje.includes("pin de carga")) {
       const esIphone = mensaje.includes("iphone");
       return res.json({
-        respuesta: `🔌 Cambio pin de carga\n💰 $${esIphone ? 80000 : 30000}`
+        respuesta: `🔌 Cambio de pin de carga\n💰 Precio final: $${esIphone ? 80000 : 30000}\n\n📩 Escribinos para coordinar el arreglo 😉`
       });
     }
 
     const datos = await obtenerDatos();
-
     const modeloBuscado = extraerModelo(mensaje);
 
     if (!modeloBuscado) {
       return res.json({
-        respuesta: "📱 Decime el modelo del equipo (ej: A05, J7, iPhone 11)"
+        respuesta: "📱 Decime el modelo del equipo (ej: A05, J7, iPhone 11) 😉"
       });
     }
 
-    // 🔍 BUSCAR TODAS LAS OPCIONES DEL MODELO
+    // 🔍 FILTRAR POR MODELO
     const resultados = datos.filter(item =>
-      limpiar(item.Modelo || "").includes(limpiar(modeloBuscado))
+      limpiar(item.Modelo).includes(limpiar(modeloBuscado))
     );
 
     if (resultados.length === 0) {
       return res.json({
-        respuesta: "❌ No encontré ese modelo, probá con otro"
+        respuesta: "❌ No encontramos ese modelo en este momento.\n\n📩 Un asesor puede ayudarte si nos das más detalles 😉"
       });
     }
 
-    // 📱 NOMBRE BONITO
+    // 📱 NOMBRE
     const nombre = resultados[0].NombreMostrar || modeloBuscado;
+
+    const opciones = {};
+
+    resultados.forEach(item => {
+      const clave = `${item.Calidad} ${item.Variante}`;
+      const base = item.PrecioBase;
+
+      const esIphone = (item.Marca || "").toLowerCase().includes("apple");
+      const final = calcularPrecio(base, esIphone);
+
+      // ❌ ignorar sin precio
+      if (!final) return;
+
+      if (!opciones[clave]) {
+        opciones[clave] = final;
+      }
+    });
+
+    const keys = Object.keys(opciones);
+
+    // ❌ SIN STOCK
+    if (keys.length === 0) {
+      return res.json({
+        respuesta: `📱 ${nombre}\n\n⚠️ En este momento no tenemos stock disponible.\n\n📩 Un asesor se va a comunicar con vos para ofrecerte una solución 😉`
+      });
+    }
+
+    // limitar a 3 opciones
+    const limitadas = keys.slice(0, 3);
 
     let respuesta = `📱 ${nombre}\n\n`;
 
-    resultados.forEach(item => {
-      const base = item.PrecioBase || 0;
-      const esIphone = (item.Marca || "").toLowerCase().includes("apple");
-
-      const final = calcularPrecio(base, esIphone);
-
-      respuesta += `🔹 ${item.Calidad} ${item.Variante} → $${final}\n`;
+    limitadas.forEach(k => {
+      respuesta += `🔹 ${k} → $${opciones[k]}\n`;
     });
+
+    respuesta += "\n📩 Escribinos para coordinar el arreglo o consultar disponibilidad 😊";
 
     return res.json({ respuesta });
 
   } catch (error) {
-    console.log(error);
+    console.log("ERROR:", error);
     return res.json({
-      respuesta: "⚠️ Error al procesar la consulta"
+      respuesta: "⚠️ Ocurrió un error. Intentá nuevamente en unos segundos."
     });
   }
 });
 
-// 🚀 PUERTO
+// 🚀 SERVIDOR
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
