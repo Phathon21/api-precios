@@ -11,7 +11,6 @@ const SHEET_URL = "https://docs.google.com/spreadsheets/d/1dvTJM6zRoc-zZMjEdWest
 // 💰 PRECIO
 function calcularPrecio(base, esIphone) {
   base = Number(base);
-
   if (esIphone) return (base + 10000) * 2 + 50000;
   return (base + 10000) * 2 + 20000;
 }
@@ -33,40 +32,42 @@ async function obtenerDatos() {
 }
 
 // 🔍 LIMPIAR TEXTO
-function limpiar(texto) {
-  return texto.toLowerCase().replace(/[^a-z0-9]/g, "");
+function limpiar(txt) {
+  return txt.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-// 🔍 BUSCAR PRODUCTO (MEJORADO)
-function buscarProducto(lista, mensaje) {
-  mensaje = limpiar(mensaje);
+// 🔍 DETECTAR MODELO DESDE MENSAJE
+function extraerModelo(mensaje) {
+  const limpio = limpiar(mensaje);
+
+  // patrones comunes
+  const match = limpio.match(/(a\d{2,3}|j\d{1,3}|g\d{1,3}|m\d{1,3}|note\d{1,3}|s\d{1,2})/i);
+
+  return match ? match[0] : null;
+}
+
+// 🔍 BUSCAR PRODUCTO
+function buscarProducto(lista, modeloBuscado) {
+  if (!modeloBuscado) return null;
+
+  modeloBuscado = limpiar(modeloBuscado);
 
   let mejor = null;
-  let mejorScore = 0;
 
   for (const item of lista) {
     const modelo = limpiar(item.Modelo || "");
     const tipo = (item.Tipo || "").toLowerCase();
 
-    // 🔴 SOLO MODULOS
+    // solo módulos
     if (!tipo.includes("modulo")) continue;
 
-    let score = 0;
-
-    if (mensaje.includes(modelo)) score += 5;
-
-    const partes = modelo.split(" ");
-    for (const p of partes) {
-      if (mensaje.includes(p)) score++;
-    }
-
-    if (score > mejorScore) {
-      mejorScore = score;
+    if (modelo.includes(modeloBuscado)) {
       mejor = item;
+      break;
     }
   }
 
-  return mejorScore > 0 ? mejor : null;
+  return mejor;
 }
 
 // 🤖 API
@@ -74,47 +75,59 @@ app.post("/precio", async (req, res) => {
   try {
     const mensaje = req.body.message.toLowerCase();
 
+    // 👋 SALUDO
+    if (
+      mensaje.includes("hola") ||
+      mensaje.includes("buenas") ||
+      mensaje.includes("buen día")
+    ) {
+      return res.json({
+        respuesta: "👋 Hola! ¿En qué puedo ayudarte?"
+      });
+    }
+
     // 🔌 SERVICIO
     if (mensaje.includes("pin de carga")) {
       const esIphone = mensaje.includes("iphone");
+
       return res.json({
         respuesta: `🔌 Cambio pin de carga\n💰 $${esIphone ? 80000 : 30000}`
       });
     }
 
+    // 🔍 DETECTAR MODELO
+    const modeloDetectado = extraerModelo(mensaje);
+
+    if (!modeloDetectado) {
+      return res.json({
+        respuesta: "📱 Decime el modelo del equipo (ej: A05, J7, iPhone 11)"
+      });
+    }
+
     const datos = await obtenerDatos();
-    const producto = buscarProducto(datos, mensaje);
+    const producto = buscarProducto(datos, modeloDetectado);
 
-    // 👉 SI ENCONTRÓ PRODUCTO
-    if (producto) {
-      let base = String(producto.PrecioBase || "0").replace(/[^\d]/g, "");
-      base = Number(base);
-
-      const esIphone = (producto.Marca || "").toLowerCase().includes("apple");
-
-      const final = calcularPrecio(base, esIphone);
-
+    if (!producto) {
       return res.json({
-        respuesta: `📱 ${producto.Modelo}\n💰 Precio final: $${final}`
+        respuesta: `📱 No encontré ${modeloDetectado}\n👉 Probá con otro modelo`
       });
     }
 
-    // 👉 SI NO ENCONTRÓ PERO SALUDAN
-    if (mensaje.includes("hola") || mensaje.includes("buenas")) {
-      return res.json({
-        respuesta: "👋 Hola! Decime el modelo y te paso el precio."
-      });
-    }
+    let base = String(producto.PrecioBase || "0").replace(/[^\d]/g, "");
+    base = Number(base);
 
-    // 👉 DEFAULT
+    const esIphone = (producto.Marca || "").toLowerCase().includes("apple");
+
+    const final = calcularPrecio(base, esIphone);
+
     return res.json({
-      respuesta: "📱 Decime el modelo del equipo (ej: Samsung A05)"
+      respuesta: `📱 ${producto.Modelo}\n💰 Precio final: $${final}`
     });
 
   } catch (error) {
     console.log(error);
     return res.json({
-      respuesta: "⚠️ Error al procesar"
+      respuesta: "⚠️ Error al procesar la consulta"
     });
   }
 });
@@ -122,5 +135,5 @@ app.post("/precio", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Servidor activo");
+  console.log("Servidor listo 🚀");
 });
