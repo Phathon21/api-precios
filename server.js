@@ -1,68 +1,66 @@
 import express from "express";
+import fetch from "node-fetch";
+import csv from "csv-parser";
+import { Readable } from "stream";
 
 const app = express();
 app.use(express.json());
 
-// 🔧 Servicios fijos
-const servicios = {
-  frp: 35000,
-  pin: 20000,
-  patron: 20000,
-  sistema: 20000,
-  virus: 5000,
-};
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC/export?format=csv";
 
-// 🔌 Pin de carga
-function precioPinCarga(texto) {
-  if (texto.includes("iphone")) return 80000;
-  return 30000;
-}
-
-// 💰 Calcular precio
+// 💰 fórmulas
 function calcularPrecio(base, esIphone) {
   base = Number(base);
-
-  if (esIphone) {
-    return (base + 10000) * 2 + 50000;
-  } else {
-    return (base + 10000) * 2 + 20000;
-  }
+  if (esIphone) return (base + 10000) * 2 + 50000;
+  return (base + 10000) * 2 + 20000;
 }
 
-// 🤖 Endpoint
+// 📥 leer sheet
+async function obtenerDatos() {
+  const res = await fetch(SHEET_URL);
+  const text = await res.text();
+
+  const results = [];
+
+  return new Promise((resolve) => {
+    Readable.from(text)
+      .pipe(csv())
+      .on("data", (data) => results.push(data))
+      .on("end", () => resolve(results));
+  });
+}
+
+// 🔍 buscar modelo
+function buscarProducto(lista, mensaje) {
+  mensaje = mensaje.toLowerCase();
+
+  return lista.find(item => {
+    const modelo = (item.Modelo || item.modelo || "").toLowerCase();
+    return mensaje.includes(modelo);
+  });
+}
+
+// 🤖 endpoint
 app.post("/precio", async (req, res) => {
   const mensaje = req.body.message.toLowerCase();
 
-  // servicios
-  for (let key in servicios) {
-    if (mensaje.includes(key)) {
-      return res.json({
-        respuesta: `🔧 ${key.toUpperCase()}\n💰 Precio final: $${servicios[key]}`
-      });
-    }
-  }
+  const datos = await obtenerDatos();
+  const producto = buscarProducto(datos, mensaje);
 
-  // pin carga
-  if (mensaje.includes("pin de carga")) {
-    const precio = precioPinCarga(mensaje);
+  if (!producto) {
     return res.json({
-      respuesta: `🔌 Cambio de pin de carga\n💰 Precio final: $${precio}`
+      respuesta: "No encontré ese modelo, probá con otro 📱"
     });
   }
 
-  // ejemplo A05
-  if (mensaje.includes("a05")) {
-    const base = 16500;
-    const final = calcularPrecio(base, mensaje.includes("iphone"));
+  const base = producto.Precio || producto.precio || 0;
+  const esIphone = mensaje.includes("iphone");
 
-    return res.json({
-      respuesta: `📱 Samsung A05\n💰 Precio final: $${final}`
-    });
-  }
+  const final = calcularPrecio(base, esIphone);
 
   return res.json({
-    respuesta: "No encontré el modelo, decime cuál es 📱"
+    respuesta: `📱 ${producto.Modelo || producto.modelo}\n💰 Precio final: $${final}`
   });
 });
 
-app.listen(3000, () => console.log("API funcionando"));
+app.listen(3000, () => console.log("API con Google Sheets activa"));
