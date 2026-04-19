@@ -65,6 +65,7 @@ app.post("/precio", async (req, res) => {
     const mensaje = req.body.message.toLowerCase();
 
     const datos = await obtenerDatos();
+    console.log(datos[0]);
     const producto = buscarProducto(datos, mensaje);
 
     if (!producto) {
