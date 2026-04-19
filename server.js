@@ -8,59 +8,91 @@ app.use(express.json());
 
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC/export?format=csv";
 
-// 💰 fórmulas
+// 💰 calcular precio
 function calcularPrecio(base, esIphone) {
   base = Number(base);
   if (esIphone) return (base + 10000) * 2 + 50000;
   return (base + 10000) * 2 + 20000;
 }
 
-// 📥 leer sheet
+// 📥 obtener datos
 async function obtenerDatos() {
   const res = await fetch(SHEET_URL);
   const text = await res.text();
 
-  const results = [];
+  const resultados = [];
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     Readable.from(text)
       .pipe(csv())
-      .on("data", (data) => results.push(data))
-      .on("end", () => resolve(results));
+      .on("data", (data) => resultados.push(data))
+      .on("end", () => resolve(resultados))
+      .on("error", (err) => reject(err));
   });
 }
 
-// 🔍 buscar modelo
+// 🔍 búsqueda inteligente
 function buscarProducto(lista, mensaje) {
   mensaje = mensaje.toLowerCase();
 
-  return lista.find(item => {
+  let mejor = null;
+  let mejorScore = 0;
+
+  for (const item of lista) {
     const modelo = (item.Modelo || item.modelo || "").toLowerCase();
-    return mensaje.includes(modelo);
-  });
+
+    const palabras = modelo.split(" ");
+    let score = 0;
+
+    for (const palabra of palabras) {
+      if (mensaje.includes(palabra)) {
+        score++;
+      }
+    }
+
+    if (score > mejorScore) {
+      mejorScore = score;
+      mejor = item;
+    }
+  }
+
+  return mejorScore > 0 ? mejor : null;
 }
 
 // 🤖 endpoint
 app.post("/precio", async (req, res) => {
-  const mensaje = req.body.message.toLowerCase();
+  try {
+    const mensaje = req.body.message.toLowerCase();
 
-  const datos = await obtenerDatos();
-  const producto = buscarProducto(datos, mensaje);
+    const datos = await obtenerDatos();
+    const producto = buscarProducto(datos, mensaje);
 
-  if (!producto) {
+    if (!producto) {
+      return res.json({
+        respuesta: "No encontré ese modelo, decime modelo exacto 📱"
+      });
+    }
+
+    const base = producto.Precio || producto.precio || 0;
+    const esIphone = mensaje.includes("iphone");
+
+    const final = calcularPrecio(base, esIphone);
+
     return res.json({
-      respuesta: "No encontré ese modelo, probá con otro 📱"
+      respuesta: `📱 ${producto.Modelo || producto.modelo}\n💰 Precio final: $${final}`
+    });
+
+  } catch (error) {
+    console.log("ERROR:", error);
+    return res.json({
+      respuesta: "Error al procesar la consulta ⚠️"
     });
   }
-
-  const base = producto.Precio || producto.precio || 0;
-  const esIphone = mensaje.includes("iphone");
-
-  const final = calcularPrecio(base, esIphone);
-
-  return res.json({
-    respuesta: `📱 ${producto.Modelo || producto.modelo}\n💰 Precio final: $${final}`
-  });
 });
 
-app.listen(3000, () => console.log("API con Google Sheets activa"));
+// ⚠️ PUERTO CORRECTO PARA RENDER
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("Servidor corriendo en puerto", PORT);
+});
