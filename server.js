@@ -6,16 +6,17 @@ import { Readable } from "stream";
 const app = express();
 app.use(express.json());
 
-const SHEET_URL = "https://docs.google.com/spreadsheets/d/1dvTJM6zRoc-zZMjEdWest2y0oofjYi9ZOmjKSi0ftDA/export?format=csv";
+// 🔗 NUEVO SHEET (FORMATO_PRO)
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/1dvTJM6zRoc-zZMjEdWest2y0oofjYi9ZOmjKSi0ftDA/export?format=csv&gid=583618011";
 
-// 💰 PRECIO
+// 💰 CALCULAR PRECIO
 function calcularPrecio(base, esIphone) {
   base = Number(base);
   if (esIphone) return (base + 10000) * 2 + 50000;
   return (base + 10000) * 2 + 20000;
 }
 
-// 📥 LEER SHEET
+// 📥 OBTENER DATOS
 async function obtenerDatos() {
   const res = await fetch(SHEET_URL);
   const text = await res.text();
@@ -36,41 +37,22 @@ function limpiar(txt) {
   return txt.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-// 🔍 DETECTAR MODELO DESDE MENSAJE
+// 🔍 DETECTAR MODELO
 function extraerModelo(mensaje) {
-  const limpio = limpiar(mensaje);
+  const limpio = mensaje.toLowerCase();
 
-  // patrones comunes
-  const match = limpio.match(/(a\d{2,3}|j\d{1,3}|g\d{1,3}|m\d{1,3}|note\d{1,3}|s\d{1,2})/i);
-
-  return match ? match[0] : null;
-}
-
-// 🔍 BUSCAR PRODUCTO
-function buscarProducto(lista, modeloBuscado) {
-  if (!modeloBuscado) return null;
-
-  modeloBuscado = limpiar(modeloBuscado);
-
-  let mejor = null;
-
-  for (const item of lista) {
-    const modelo = limpiar(item.Modelo || "");
-    const tipo = (item.Tipo || "").toLowerCase();
-
-    // solo módulos
-    if (!tipo.includes("modulo")) continue;
-
-    if (modelo.includes(modeloBuscado)) {
-      mejor = item;
-      break;
-    }
+  // iPhone
+  if (limpio.includes("iphone") || limpio.includes("iph")) {
+    const num = limpio.match(/\d+/);
+    if (num) return "iphone" + num[0];
   }
 
-  return mejor;
+  // Android
+  const match = limpio.match(/([a-z]{1,2}\s?\d{1,3})/i);
+  return match ? match[0].replace(" ", "") : null;
 }
 
-// 🤖 API
+// 🤖 ENDPOINT
 app.post("/precio", async (req, res) => {
   try {
     const mensaje = req.body.message.toLowerCase();
@@ -86,43 +68,50 @@ app.post("/precio", async (req, res) => {
       });
     }
 
-    // 🔌 SERVICIO
+    // 🔌 SERVICIO PIN DE CARGA
     if (mensaje.includes("pin de carga")) {
       const esIphone = mensaje.includes("iphone");
-
       return res.json({
         respuesta: `🔌 Cambio pin de carga\n💰 $${esIphone ? 80000 : 30000}`
       });
     }
 
-    // 🔍 DETECTAR MODELO
-    const modeloDetectado = extraerModelo(mensaje);
+    const datos = await obtenerDatos();
 
-    if (!modeloDetectado) {
+    const modeloBuscado = extraerModelo(mensaje);
+
+    if (!modeloBuscado) {
       return res.json({
         respuesta: "📱 Decime el modelo del equipo (ej: A05, J7, iPhone 11)"
       });
     }
 
-    const datos = await obtenerDatos();
-    const producto = buscarProducto(datos, modeloDetectado);
+    // 🔍 BUSCAR TODAS LAS OPCIONES DEL MODELO
+    const resultados = datos.filter(item =>
+      limpiar(item.Modelo || "").includes(limpiar(modeloBuscado))
+    );
 
-    if (!producto) {
+    if (resultados.length === 0) {
       return res.json({
-        respuesta: `📱 No encontré ${modeloDetectado}\n👉 Probá con otro modelo`
+        respuesta: "❌ No encontré ese modelo, probá con otro"
       });
     }
 
-    let base = String(producto.PrecioBase || "0").replace(/[^\d]/g, "");
-    base = Number(base);
+    // 📱 NOMBRE BONITO
+    const nombre = resultados[0].NombreMostrar || modeloBuscado;
 
-    const esIphone = (producto.Marca || "").toLowerCase().includes("apple");
+    let respuesta = `📱 ${nombre}\n\n`;
 
-    const final = calcularPrecio(base, esIphone);
+    resultados.forEach(item => {
+      const base = item.PrecioBase || 0;
+      const esIphone = (item.Marca || "").toLowerCase().includes("apple");
 
-    return res.json({
-      respuesta: `📱 ${producto.Modelo}\n💰 Precio final: $${final}`
+      const final = calcularPrecio(base, esIphone);
+
+      respuesta += `🔹 ${item.Calidad} ${item.Variante} → $${final}\n`;
     });
+
+    return res.json({ respuesta });
 
   } catch (error) {
     console.log(error);
@@ -132,8 +121,9 @@ app.post("/precio", async (req, res) => {
   }
 });
 
+// 🚀 PUERTO
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Servidor listo 🚀");
+  console.log("Servidor funcionando 🚀");
 });
