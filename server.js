@@ -6,16 +6,21 @@ import { Readable } from "stream";
 const app = express();
 app.use(express.json());
 
-const SHEET_URL = "https://docs.google.com/spreadsheets/d/17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC/export?format=csv";
+// 🔗 TU NUEVO SHEET (CSV)
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/1dvTJM6zRoc-zZMjEdWest2y0oofjYi9ZOmjKSi0ftDA/export?format=csv";
 
-// 💰 calcular precio
+// 💰 FORMULAS
 function calcularPrecio(base, esIphone) {
   base = Number(base);
-  if (esIphone) return (base + 10000) * 2 + 50000;
+
+  if (esIphone) {
+    return (base + 10000) * 2 + 50000;
+  }
+
   return (base + 10000) * 2 + 20000;
 }
 
-// 📥 obtener datos
+// 📥 LEER GOOGLE SHEET
 async function obtenerDatos() {
   const res = await fetch(SHEET_URL);
   const text = await res.text();
@@ -31,69 +36,53 @@ async function obtenerDatos() {
   });
 }
 
-// 🔍 búsqueda inteligente
+// 🔍 BUSCAR PRODUCTO
 function buscarProducto(lista, mensaje) {
   mensaje = mensaje.toLowerCase();
 
-  let mejor = null;
-  let mejorScore = 0;
-
-  for (const item of lista) {
-    const modelo = (item.Modelo || item.modelo || "").toLowerCase();
-
-    const palabras = modelo.split(" ");
-    let score = 0;
-
-    for (const palabra of palabras) {
-      if (mensaje.includes(palabra)) {
-        score++;
-      }
-    }
-
-    if (score > mejorScore) {
-      mejorScore = score;
-      mejor = item;
-    }
-  }
-
-  return mejorScore > 0 ? mejor : null;
+  return lista.find(item => {
+    const modelo = (item.Modelo || "").toLowerCase();
+    return mensaje.includes(modelo);
+  });
 }
 
-// 🤖 endpoint
+// 🤖 ENDPOINT
 app.post("/precio", async (req, res) => {
   try {
     const mensaje = req.body.message.toLowerCase();
 
     const datos = await obtenerDatos();
-    console.log(datos[0]);
+
     const producto = buscarProducto(datos, mensaje);
 
     if (!producto) {
       return res.json({
-        respuesta: "No encontré ese modelo, decime modelo exacto 📱"
+        respuesta: "No encontré ese modelo, decime modelo más específico 📱"
       });
     }
 
-    const base = producto.Precio || producto.precio || 0;
-    const esIphone = mensaje.includes("iphone");
+    const base = Number(producto.PrecioBase || 0);
+
+    const esIphone = (producto.Marca || "").toLowerCase().includes("apple");
 
     const final = calcularPrecio(base, esIphone);
 
     return res.json({
-      respuesta: `📱 ${producto.Modelo || producto.modelo}\n💰 Precio final: $${final}`
+      respuesta: `📱 ${producto.Modelo}\n💰 Precio final: $${final}`
     });
 
   } catch (error) {
     console.log("ERROR:", error);
+
     return res.json({
       respuesta: "Error al procesar la consulta ⚠️"
     });
   }
 });
 
-// ⚠️ PUERTO CORRECTO PARA RENDER
+// ⚠️ PUERTO RENDER
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Servidor corriendo en puerto", PORT);
+  console.log("Servidor funcionando en puerto", PORT);
 });
