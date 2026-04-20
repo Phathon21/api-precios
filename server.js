@@ -22,7 +22,7 @@ const CACHE_TTL = 5 * 60 * 1000;
 // 💰 LÓGICA DE PRECIOS - SIEMPRE DEVUELVE NÚMERO VÁLIDO
 function calcularPrecio(base, marca, parte) {
     base = Number(String(base).replace(/[^0-9]/g, ""));
-    if (!base || base <= 0) return 0; // ← Garantiza que nunca sea null/NaN
+    if (!base || base <= 0) return 0; // ← Garantiza número válido, nunca null/NaN
 
     const esIphone = (marca || "").toLowerCase().includes("apple") || (marca || "").toLowerCase().includes("iphone");
     const esPantalla = (parte || "").toLowerCase().includes("modulo") || (parte || "").toLowerCase().includes("pantall");
