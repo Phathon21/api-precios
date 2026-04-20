@@ -6,151 +6,119 @@ import { Readable } from "stream";
 const app = express();
 app.use(express.json());
 
-// 🔗 TU SHEET NUEVO
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/1dvTJM6zRoc-zZMjEdWest2y0oofjYi9ZOmjKSi0ftDA/export?format=csv&gid=583618011";
 
-// 💰 CALCULAR PRECIO
-function calcularPrecio(base, esIphone) {
-  base = Number(base);
-  if (!base || base <= 0) return null;
+// 💰 LÓGICA DE PRECIOS (Ajustala a tu margen de Catamarca)
+function calcularPrecio(base, marca) {
+    base = Number(base);
+    if (!base || base <= 0) return null;
 
-  if (esIphone) return (base + 10000) * 2 + 50000;
-  return (base + 10000) * 2 + 20000;
+    const esIphone = (marca || "").toLowerCase().includes("apple") || (marca || "").toLowerCase().includes("iphone");
+    
+    // Tu fórmula actual
+    if (esIphone) return (base + 10000) * 2 + 50000;
+    return (base + 10000) * 2 + 20000;
 }
 
-// 📥 LEER SHEET
-async function obtenerDatos() {
-  const res = await fetch(SHEET_URL);
-  const text = await res.text();
-
-  const resultados = [];
-
-  return new Promise((resolve, reject) => {
-    Readable.from(text)
-      .pipe(csv())
-      .on("data", (data) => resultados.push(data))
-      .on("end", () => resolve(resultados))
-      .on("error", (err) => reject(err));
-  });
+// 🧼 LIMPIAR TEXTO (Mejorada para no borrar la 'S' de los modelos)
+function limpiarParaBusqueda(txt) {
+    return (txt || "").toLowerCase().trim().replace(/\s+/g, ""); 
 }
 
-// 🧼 LIMPIAR TEXTO
-function limpiar(txt) {
-  return (txt || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-// 🔍 DETECTAR MODELO
+// 🔍 EXTRAER MODELO DEL MENSAJE
 function extraerModelo(mensaje) {
-  const limpio = mensaje.toLowerCase();
+    const limpio = mensaje.toLowerCase();
+    
+    // Detecta iPhone
+    if (limpio.includes("iphone")) {
+        const num = limpio.match(/\d+/);
+        return num ? "iphone" + num[0] : "iphone";
+    }
 
-  // iPhone
-  if (limpio.includes("iphone") || limpio.includes("iph")) {
-    const num = limpio.match(/\d+/);
-    if (num) return "iphone" + num[0];
-  }
-
-  // Android
-  const match = limpio.match(/([a-z]{1,2}\s?\d{1,3})/i);
-  return match ? match[0].replace(" ", "") : null;
+    // Detecta Android (A04s, G52, J7 Prime, etc)
+    // Esta regex ahora permite una letra opcional al final (como la 'S' o 'G')
+    const match = limpio.match(/([a-z]{1,2}\s?\d{1,3}[a-z]?)/i);
+    return match ? match[0].replace(/\s+/g, "") : null;
 }
 
-// 🤖 ENDPOINT
 app.post("/precio", async (req, res) => {
-  try {
-    const mensaje = req.body.message.toLowerCase();
+    try {
+        const mensaje = req.body.message.toLowerCase();
+        
+        // --- RESPUESTAS DE SERVICIOS FIJOS ---
+        if (mensaje.includes("pin de carga") || mensaje.includes("no carga")) {
+            return res.json({ respuesta: "🔌 *Cambio de Pin de Carga*\n💰 Precio estimado: $30.000 a $45.000\n\n(Depende del modelo exacto). Traelo al local para confirmar. 😉" });
+        }
+        
+        if (mensaje.includes("cuenta google") || mensaje.includes("frp") || mensaje.includes("bloqueado")) {
+            return res.json({ respuesta: "🔐 *Desbloqueo de Cuenta Google (FRP)*\n💰 Precio: Desde $15.000\n⏳ Tiempo: 1 a 3 horas.\n\nTraelo cuando quieras. 😉" });
+        }
 
-    // 👋 SALUDO
-    if (
-      mensaje.includes("hola") ||
-      mensaje.includes("buenas") ||
-      mensaje.includes("buen día")
-    ) {
-      return res.json({
-        respuesta: "👋 Hola! ¿En qué puedo ayudarte hoy? 😊"
-      });
+        if (mensaje.includes("formateo") || mensaje.includes("windows") || mensaje.includes("lenta")) {
+            return res.json({ respuesta: "💻 *Servicio técnico PC/Notebook*\n• Formateo + Windows + Programas: $25.000\n• Limpieza física: $15.000\n\n¡Queda como nueva! 🚀" });
+        }
+
+        const resSheet = await fetch(SHEET_URL);
+        const text = await resSheet.text();
+        const datos = [];
+
+        // Parsear CSV
+        const parsear = () => new Promise((resolve) => {
+            Readable.from(text)
+                .pipe(csv())
+                .on("data", (row) => datos.push(row))
+                .on("end", resolve);
+        });
+        await parsear();
+
+        const modeloBuscado = extraerModelo(mensaje);
+
+        if (!modeloBuscado) {
+            return res.json({ respuesta: "👋 ¡Hola! Soy el asistente técnico.\n\nPor favor, decime el *modelo exacto* del equipo para darte el precio del repuesto (Ej: A04s, Moto G52, iPhone 13)." });
+        }
+
+        // 🔍 BUSQUEDA MÁS FLEXIBLE
+        // Busca si el modelo que escribió el usuario está CONTENIDO en la columna Modelo del Excel
+        const resultados = datos.filter(item => {
+            const modeloExcel = limpiarParaBusqueda(item.Modelo);
+            const busqueda = limpiarParaBusqueda(modeloBuscado);
+            return modeloExcel.includes(busqueda) || busqueda.includes(modeloExcel);
+        });
+
+        if (resultados.length === 0) {
+            return res.json({ 
+                respuesta: `❌ No encontré el precio de *${modeloBuscado.toUpperCase()}* en la base de datos.\n\n📩 Un *técnico* va a revisar el stock manualmente y te contesta en un toque. 😉` 
+            });
+        }
+
+        const nombreReal = resultados[0].NombreMostrar || resultados[0].Modelo;
+        let respuesta = `📱 *${nombreReal}*\n\n`;
+        let hayOpciones = false;
+
+        // Armar lista de precios
+        resultados.forEach(item => {
+            const precio = calcularPrecio(item.PrecioBase, item.Marca);
+            if (precio) {
+                hayOpciones = true;
+                const calidad = item.Calidad || "Repuesto";
+                const variante = item.Variante ? `(${item.Variante})` : "";
+                respuesta += `🔹 ${calidad} ${variante} → *$${precio.toLocaleString('es-AR')}*\n`;
+            }
+        });
+
+        if (!hayOpciones) {
+            return res.json({ respuesta: `⚠️ Tenemos el modelo *${nombreReal}* pero consultanos el precio por privado porque no figura en lista.` });
+        }
+
+        respuesta += "\n✅ *Precios finales con colocación incluida.*\n📩 ¿Te gustaría que encarguemos el repuesto?";
+
+        return res.json({ respuesta });
+
+    } catch (error) {
+        console.error(error);
+        return res.json({ respuesta: "⚠️ Un técnico revisará tu consulta en breve. 😉" });
     }
-
-    // 🔌 SERVICIO PIN DE CARGA
-    if (mensaje.includes("pin de carga")) {
-      const esIphone = mensaje.includes("iphone");
-      return res.json({
-        respuesta: `🔌 Cambio de pin de carga\n💰 Precio final: $${esIphone ? 80000 : 30000}\n\n📩 Escribinos para coordinar el arreglo 😉`
-      });
-    }
-
-    const datos = await obtenerDatos();
-    const modeloBuscado = extraerModelo(mensaje);
-
-    if (!modeloBuscado) {
-      return res.json({
-        respuesta: "📱 Decime el modelo del equipo (ej: A05, J7, iPhone 11) 😉"
-      });
-    }
-
-    // 🔍 FILTRAR POR MODELO
-    const resultados = datos.filter(item =>
-      limpiar(item.Modelo).includes(limpiar(modeloBuscado))
-    );
-
-    if (resultados.length === 0) {
-      return res.json({
-        respuesta: "❌ No encontramos ese modelo en este momento.\n\n📩 Un asesor puede ayudarte si nos das más detalles 😉"
-      });
-    }
-
-    // 📱 NOMBRE
-    const nombre = resultados[0].NombreMostrar || modeloBuscado;
-
-    const opciones = {};
-
-    resultados.forEach(item => {
-      const clave = `${item.Calidad} ${item.Variante}`;
-      const base = item.PrecioBase;
-
-      const esIphone = (item.Marca || "").toLowerCase().includes("apple");
-      const final = calcularPrecio(base, esIphone);
-
-      // ❌ ignorar sin precio
-      if (!final) return;
-
-      if (!opciones[clave]) {
-        opciones[clave] = final;
-      }
-    });
-
-    const keys = Object.keys(opciones);
-
-    // ❌ SIN STOCK
-    if (keys.length === 0) {
-      return res.json({
-        respuesta: `📱 ${nombre}\n\n⚠️ En este momento no tenemos stock disponible.\n\n📩 Un asesor se va a comunicar con vos para ofrecerte una solución 😉`
-      });
-    }
-
-    // limitar a 3 opciones
-    const limitadas = keys.slice(0, 3);
-
-    let respuesta = `📱 ${nombre}\n\n`;
-
-    limitadas.forEach(k => {
-      respuesta += `🔹 ${k} → $${opciones[k]}\n`;
-    });
-
-    respuesta += "\n📩 Escribinos para coordinar el arreglo o consultar disponibilidad 😊";
-
-    return res.json({ respuesta });
-
-  } catch (error) {
-    console.log("ERROR:", error);
-    return res.json({
-      respuesta: "⚠️ Ocurrió un error. Intentá nuevamente en unos segundos."
-    });
-  }
 });
 
-// 🚀 SERVIDOR
 const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log("Servidor funcionando 🚀");
-});
+app.listen(PORT, () => console.log("API de Precios lista 🚀"));
