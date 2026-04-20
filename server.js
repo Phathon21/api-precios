@@ -19,21 +19,10 @@ let cachedData = null;
 let lastFetch = 0;
 const CACHE_TTL = 5 * 60 * 1000;
 
-// 💰 SERVICIOS FIJOS CON PRECIOS EXACTOS (ACTUALIZADO)
-const SERVICIOS_FIJOS = {
-    pinAndroid: { nombre: "Cambio de Pin de Carga (Android)", precio: 30000 },
-    pinIphone: { nombre: "Cambio de Pin de Carga (iPhone)", precio: 70000 },
-    frp: { nombre: "Eliminación Cuenta Google (FRP)", precio: 35000 },
-    windows: { nombre: "Instalación de Windows + Programas", precio: 25000 },
-    windowsOffice: { nombre: "Windows + Office + Programas a elección", precio: 30000 },
-    mantenimiento: { nombre: "Mantenimiento de PC (Limpieza física + software)", precio: 15000 },
-    virus: { nombre: "Eliminación de Virus Publicitario", precio: 7000 }
-};
-
-// 💰 LÓGICA DE PRECIOS PARA REPUESTOS
+// 💰 LÓGICA DE PRECIOS - SIEMPRE DEVUELVE NÚMERO VÁLIDO
 function calcularPrecio(base, marca, parte) {
-    base = Number(base);
-    if (!base || base <= 0) return null;
+    base = Number(String(base).replace(/[^0-9]/g, ""));
+    if (!base || base <= 0) return 0; // ← Siempre retorna número, nunca null
 
     const esIphone = (marca || "").toLowerCase().includes("apple") || (marca || "").toLowerCase().includes("iphone");
     const esPantalla = (parte || "").toLowerCase().includes("modulo");
@@ -46,21 +35,25 @@ function calcularPrecio(base, marca, parte) {
     return Math.round((base + margenBase) * 2 + gananciaFija);
 }
 
-// 🧼 NORMALIZAR TEXTO
+// 🧼 NORMALIZAR TEXTO (para comparaciones)
 function normalizar(txt) {
-    return (txt || "").toString().toLowerCase().trim().replace(/[^a-z0-9]/g, "");
+    if (!txt) return "";
+    return txt.toString().toLowerCase().trim()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // quita acentos
+        .replace(/[^\w\s]/g, "") // quita símbolos
+        .replace(/\s+/g, " "); // unifica espacios
 }
 
-// 🔍 DETECTAR TIPO DE REPUESTO: batería vs pantalla
+// 🔍 DETECTAR TIPO DE REPUESTO: batería, pantalla, o AMBOS
 function detectarTipoRepuesto(texto) {
-    const t = texto.toLowerCase();
-    if (t.includes("bater") || t.includes("pila") || (t.includes("carga") && !t.includes("pin"))) {
-        return "bateria";
-    }
-    if (t.includes("pantall") || t.includes("modulo") || t.includes("display") || t.includes("lcd") || t.includes("cambiar pantalla")) {
-        return "pantalla";
-    }
-    return null; // No especificado → default pantalla
+    const t = normalizar(texto);
+    const tieneBateria = /\bbater|pila|cambiar bateria|cambio bateria/.test(t);
+    const tienePantalla = /\bpantall|modulo|display|lcd|cambiar pantalla|cambio pantalla/.test(t);
+    
+    if (tieneBateria && tienePantalla) return "ambos"; // ← NUEVO: detecta ambos
+    if (tieneBateria) return "bateria";
+    if (tienePantalla) return "pantalla";
+    return null;
 }
 
 // 🔍 EXTRAER MODELO + MARCA
@@ -73,17 +66,17 @@ function parsearConsulta(mensaje) {
         const num = limpio.match(/(?:iphone\s*)?(\d+[a-z]?)/i);
         return { 
             modelo: num ? "iphone" + num[1].toLowerCase() : null, 
-            tipoRepuesto: tipoRepuesto || "pantalla", 
+            tipoRepuesto, 
             marca: "Apple" 
         };
     }
 
     // Samsung
-    const samsungMatch = limpio.match(/\b([asjmn]\d{1,3}[a-z]?(?:\s*pro|plus|fe|ultra)?)/i);
+    const samsungMatch = limpio.match(/\b([asjmn]\d{1,3}[a-z]?(?:\s*(?:pro|plus|fe|ultra|core|s))?)/i);
     if (samsungMatch) {
         return { 
             modelo: samsungMatch[1].toLowerCase().replace(/\s+/g, ""), 
-            tipoRepuesto: tipoRepuesto || "pantalla", 
+            tipoRepuesto, 
             marca: "Samsung" 
         };
     }
@@ -93,7 +86,7 @@ function parsearConsulta(mensaje) {
     if (motoMatch) {
         return { 
             modelo: motoMatch[1].toLowerCase().replace(/\s+/g, ""), 
-            tipoRepuesto: tipoRepuesto || "pantalla", 
+            tipoRepuesto, 
             marca: "Motorola" 
         };
     }
@@ -102,13 +95,13 @@ function parsearConsulta(mensaje) {
     const xiaomiMatch = limpio.match(/\b(?:redmi\s*|poco\s*|mi\s*)?(note\s*\d+[a-z]?|\d{1,3}[a-z]?)/i);
     if (xiaomiMatch) {
         let modelo = xiaomiMatch[0].toLowerCase().replace(/\s+/g, "").replace(/^(redmi|poco|mi)/, "");
-        return { modelo, tipoRepuesto: tipoRepuesto || "pantalla", marca: "Xiaomi" };
+        return { modelo, tipoRepuesto, marca: "Xiaomi" };
     }
 
     const fallback = limpio.match(/\b([a-z]{1,3}\d{1,3}[a-z]?)\b/i);
     return { 
         modelo: fallback ? fallback[1].toLowerCase() : null, 
-        tipoRepuesto: tipoRepuesto || "pantalla", 
+        tipoRepuesto, 
         marca: null 
     };
 }
@@ -159,15 +152,20 @@ function buscarRepuestos(datos, { modelo, tipoRepuesto, marca }) {
     if (!modelo) return [];
     
     const modeloNorm = normalizar(modelo);
-    const parteNorm = normalizar(tipoRepuesto);
     const marcaNorm = marca ? normalizar(marca) : null;
     
     return datos.filter(item => {
         const matchModelo = item.Modelo === modeloNorm || item.Modelo.includes(modeloNorm);
         
-        const matchParte = parteNorm === "bateria" 
-            ? item.Parte?.includes("bater") 
-            : item.Parte?.includes("modulo") || item.Parte?.includes("pantall");
+        let matchParte = false;
+        if (tipoRepuesto === "ambos") {
+            // Si es "ambos", aceptamos tanto batería como módulo
+            matchParte = item.Parte?.includes("bater") || item.Parte?.includes("modulo") || item.Parte?.includes("pantall");
+        } else if (tipoRepuesto === "bateria") {
+            matchParte = item.Parte?.includes("bater");
+        } else {
+            matchParte = item.Parte?.includes("modulo") || item.Parte?.includes("pantall");
+        }
         
         const matchMarca = !marcaNorm || item.Marca?.includes(marcaNorm);
         
@@ -175,132 +173,140 @@ function buscarRepuestos(datos, { modelo, tipoRepuesto, marca }) {
     });
 }
 
-// 🔍 DETECTAR SERVICIO FIJO
-function detectarServicioFijo(texto) {
-    const t = texto.toLowerCase();
-    
-    // Pin de carga
-    if (t.includes("pin") && t.includes("carga")) {
-        return t.includes("iphone") || t.includes("iph") ? "pinIphone" : "pinAndroid";
-    }
-    // FRP
-    if (t.includes("frp") || t.includes("cuenta google") || t.includes("bloqueado") || t.includes("patrón") || t.includes("patron")) {
-        return "frp";
-    }
-    // Windows
-    if (t.includes("windows") || t.includes("formateo") || t.includes("instalar windows")) {
-        return t.includes("office") || t.includes("programa") ? "windowsOffice" : "windows";
-    }
-    // Mantenimiento PC
-    if ((t.includes("mantenim") || t.includes("limpieza")) && (t.includes("pc") || t.includes("notebook") || t.includes("computadora"))) {
-        return "mantenimiento";
-    }
-    // Virus
-    if (t.includes("virus") || t.includes("publicitario") || t.includes("spam") || t.includes("ventana emergente")) {
-        return "virus";
-    }
-    return null;
-}
-
 // 🚀 ENDPOINT PRINCIPAL
 app.post("/precio", async (req, res) => {
     try {
         const mensaje = req.body.message || req.body.texto || "";
-        const textoLimpio = mensaje.toLowerCase().trim();
-
-        // ========================================
-        // 🛠️ CASO 1: SERVICIOS FIJOS (con precios exactos)
-        // ========================================
-        const servicio = detectarServicioFijo(mensaje);
-        if (servicio) {
-            const s = SERVICIOS_FIJOS[servicio];
-            return res.json({ 
-                respuesta: `🔧 *${s.nombre}*\n\n💰 Precio: *$${s.precio.toLocaleString('es-AR')}*\n\n✅ Incluye mano de obra y garantía.\n📍 Retiro en local o coordinamos envío.\n\n¿Te gustaría agendar un turno?` 
-            });
-        }
-
-        // ========================================
-        // 🔋 CASO 2: BATERÍA → PRECIO DIRECTO (sin preguntar calidad)
-        // ========================================
         const consulta = parsearConsulta(mensaje);
         
-        if (consulta.modelo && consulta.tipoRepuesto === "bateria") {
-            const datos = await cargarDatos();
-            const resultados = buscarRepuestos(datos, consulta);
-            
-            if (resultados.length > 0) {
-                const item = resultados[0];
-                const precio = calcularPrecio(item.PrecioBase, item.Marca, item.Parte);
-                const nombreReal = item.NombreMostrar || `${item.Marca} ${consulta.modelo}`;
-                
-                return res.json({
-                    respuesta: `🔋 *Batería para ${nombreReal}*\n\n💰 Precio: *$${precio.toLocaleString('es-AR')}* (Original con colocación)\n\n⚠️ El precio puede variar según stock. ¿Confirmás que querés este repuesto?\n\n1. ✅ Sí, quiero reservar\n2. ❌ No, era otra consulta`,
-                    tipo: "bateria_confirmacion",
-                    modelo: consulta.modelo,
-                    precio: precio
-                });
-            }
-        }
-
-        // ========================================
-        // 🖥️ CASO 3: PANTALLA/MÓDULO → PREGUNTAR CALIDAD
-        // ========================================
-        if (consulta.modelo && (consulta.tipoRepuesto === "pantalla" || !consulta.tipoRepuesto)) {
-            const datos = await cargarDatos();
-            const resultados = buscarRepuestos(datos, consulta);
-            
-            if (resultados.length > 0) {
-                // Agrupar por calidad para mostrar opciones
-                const opciones = {};
-                resultados.forEach(item => {
-                    const key = item.Calidad || "Estándar";
-                    if (!opciones[key]) opciones[key] = [];
-                    opciones[key].push(item);
-                });
-                
-                const nombreReal = resultados[0].NombreMostrar || `${resultados[0].Marca} ${consulta.modelo}`;
-                let respuesta = `📱 *Pantalla para ${nombreReal}*\n\n¿Qué calidad buscás?\n\n`;
-                
-                let idx = 1;
-                for (const [calidad, items] of Object.entries(opciones)) {
-                    const precio = calcularPrecio(items[0].PrecioBase, items[0].Marca, items[0].Parte);
-                    if (precio) {
-                        respuesta += `${idx}. *${calidad}* - Desde $${precio.toLocaleString('es-AR')}\n`;
-                        idx++;
-                    }
-                }
-                
-                respuesta += `\n*(Escribí el nombre o el número)*`;
-                
-                return res.json({
-                    respuesta: respuesta,
-                    tipo: "pantalla_calidad",
-                    modelo: consulta.modelo,
-                    opciones: Object.keys(opciones)
-                });
-            }
-        }
-
-        // ========================================
-        // ❓ CASO 4: SALUDO GENÉRICO o SIN MODELO DETECTADO
-        // ========================================
-        if (!consulta.modelo || textoLimpio.match(/^(hola|buenas|buenos|hello|hi|epa)$/)) {
+        if (!consulta.modelo) {
             return res.json({ 
-                respuesta: `👋 ¡Hola! Soy el asistente técnico de *EAInformatica*.\n\nContame: ¿Qué modelo de equipo tenés?` 
+                respuesta: `👋 ¡Hola! Soy el asistente técnico de *EAInformatica*.\n\nContame: ¿Qué modelo de equipo tenés?`,
+                tipo: "saludo"
+            });
+        }
+
+        const datos = await cargarDatos();
+        const resultados = buscarRepuestos(datos, consulta);
+
+        if (resultados.length === 0) {
+            return res.json({ 
+                respuesta: `❌ No encontré información para *${consulta.modelo.toUpperCase()}*.\n\n📩 Un *técnico* va a revisar manualmente y te contesta en un toque. 😉`,
+                tipo: "no_encontrado"
             });
         }
 
         // ========================================
-        // ❌ CASO 5: NO ENCONTRADO
+        // 🔋🖥️ CASO: AMBOS REPUESTOS (pantalla + batería)
         // ========================================
-        return res.json({ 
-            respuesta: `❌ No encontré información para *${consulta.modelo?.toUpperCase() || "ese modelo"}*.\n\n📩 Un *técnico* va a revisar manualmente y te contesta en un toque. 😉` 
+        if (consulta.tipoRepuesto === "ambos") {
+            const pantallas = resultados.filter(r => r.Parte?.includes("modulo") || r.Parte?.includes("pantall"));
+            const baterias = resultados.filter(r => r.Parte?.includes("bater"));
+            
+            let respuesta = `🔋🖥️ Presupuesto para *${resultados[0].NombreMostrar || consulta.modelo.toUpperCase()}*:\n\n`;
+            
+            // Precios de batería
+            if (baterias.length > 0) {
+                const precioBateria = calcularPrecio(baterias[0].PrecioBase, baterias[0].Marca, baterias[0].Parte);
+                respuesta += `🔹 *Batería (Original)* → *$${precioBateria.toLocaleString('es-AR')}*\n`;
+            }
+            
+            // Precios de pantalla por calidad
+            if (pantallas.length > 0) {
+                const opciones = {};
+                pantallas.forEach(item => {
+                    const calidad = item.Calidad || "Estándar";
+                    if (!opciones[calidad]) opciones[calidad] = [];
+                    opciones[calidad].push(item);
+                });
+                
+                respuesta += `\n🔹 *Pantalla*:\n`;
+                for (const [calidad, items] of Object.entries(opciones)) {
+                    const precio = calcularPrecio(items[0].PrecioBase, items[0].Marca, items[0].Parte);
+                    respuesta += `   • ${calidad} → *$${precio.toLocaleString('es-AR')}*\n`;
+                }
+            }
+            
+            respuesta += `\n✅ *Precios finales con colocación incluida.*\n📍 ¿Qué repuesto querés encargar?`;
+            
+            return res.json({
+                respuesta,
+                tipo: "ambos_repuestos",
+                modelo: consulta.modelo,
+                precios: {
+                    bateria: baterias[0] ? calcularPrecio(baterias[0].PrecioBase, baterias[0].Marca, baterias[0].Parte) : null,
+                    pantalla: Object.fromEntries(
+                        Object.entries(
+                            pantallas.reduce((acc, item) => {
+                                const calidad = item.Calidad || "Estándar";
+                                if (!acc[calidad]) acc[calidad] = item.PrecioBase;
+                                return acc;
+                            }, {})
+                        ).map(([calidad, base]) => [
+                            calidad, 
+                            calcularPrecio(base, pantallas[0].Marca, pantallas[0].Parte)
+                        ])
+                    )
+                }
+            });
+        }
+
+        // ========================================
+        // 🔋 CASO: SOLO BATERÍA → PRECIO DIRECTO
+        // ========================================
+        if (consulta.tipoRepuesto === "bateria") {
+            const item = resultados[0];
+            const precio = calcularPrecio(item.PrecioBase, item.Marca, item.Parte);
+            const nombreReal = item.NombreMostrar || `${item.Marca} ${consulta.modelo}`;
+            
+            return res.json({
+                respuesta: `🔋 *Batería para ${nombreReal}*\n\n💰 Precio: *$${precio.toLocaleString('es-AR')}* (Original con colocación)\n\n⚠️ El precio puede variar según stock. ¿Confirmás que querés este repuesto?\n\n1. ✅ Sí, quiero reservar\n2. ❌ No, era otra consulta`,
+                tipo: "bateria_confirmacion",
+                modelo: consulta.modelo,
+                precio: precio
+            });
+        }
+
+        // ========================================
+        // 🖥️ CASO: SOLO PANTALLA → MOSTRAR PRECIOS POR CALIDAD
+        // ========================================
+        // Agrupar por calidad para mostrar opciones CON PRECIOS
+        const opciones = {};
+        resultados.forEach(item => {
+            const key = item.Calidad || "Estándar";
+            if (!opciones[key]) opciones[key] = [];
+            opciones[key].push(item);
+        });
+        
+        const nombreReal = resultados[0].NombreMostrar || `${resultados[0].Marca} ${consulta.modelo}`;
+        let respuesta = `📱 *Pantalla para ${nombreReal}*\n\n¿Qué calidad buscás?\n\n`;
+        
+        let idx = 1;
+        for (const [calidad, items] of Object.entries(opciones)) {
+            const precio = calcularPrecio(items[0].PrecioBase, items[0].Marca, items[0].Parte);
+            // ← AQUÍ ESTÁ LA CLAVE: mostramos el precio calculado
+            respuesta += `${idx}. *${calidad}* → *$${precio.toLocaleString('es-AR')}*\n`;
+            idx++;
+        }
+        
+        respuesta += `\n*(Escribí el nombre o el número)*`;
+        
+        return res.json({
+            respuesta: respuesta,
+            tipo: "pantalla_calidad",
+            modelo: consulta.modelo,
+            opciones: Object.keys(opciones).map((calidad, i) => ({
+                nombre: calidad,
+                precio: calcularPrecio(opciones[calidad][0].PrecioBase, resultados[0].Marca, resultados[0].Parte),
+                numero: i + 1
+            }))
         });
 
     } catch (error) {
         console.error("❌ Error en /precio:", error.message);
         return res.json({ 
-            respuesta: "⚠️ Tuvimos un inconveniente técnico.\n\n📩 Un humano va a revisar tu consulta y te responde en breve. ¡Gracias por la paciencia! 😉" 
+            respuesta: "⚠️ Tuvimos un inconveniente técnico.\n\n📩 Un humano va a revisar tu consulta y te responde en breve. ¡Gracias por la paciencia! 😉",
+            tipo: "error"
         });
     }
 });
