@@ -6,7 +6,7 @@ import { Readable } from "stream";
 const app = express();
 app.use(express.json());
 
-const SHEET_URL = "https://docs.google.com/spreadsheets/d/1dvTJM6zRoc-zZMjEdWest2y0oofjYi9ZOmjKSi0ftDA/export?format=csv&gid=583618011";
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/1VoARNjyEyEjI_MRtdtfsj-7ztHshQYcOXYQhPNS2S14/edit?hl=es&gid=942358472#gid=942358472";
 
 // 💰 LÓGICA DE PRECIOS (Ajustala a tu margen de Catamarca)
 function calcularPrecio(base, marca) {
