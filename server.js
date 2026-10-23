@@ -11,7 +11,6 @@ app.use(express.json());
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Servir archivos de la raíz (index.html, logo.jpg, etc.)
 app.use(express.static(__dirname));
 
 // 💳 COSTOS FLETES Y MANO DE OBRA
@@ -28,7 +27,7 @@ const SERVICIOS_FIJOS = {
     office: { nombre: "Instalación Paquete Office (PC)", precio: 15000 }
 };
 
-// 📁 GOOGLE SHEETS DE UNV (Pestañas configuradas)
+// 📁 GOOGLE SHEETS DE UNV
 const SHEET_ID = "17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC"; 
 const GIDS_PROVEEDOR = [
     { nombre: "MODULOS", gid: "1868161265" },
@@ -55,7 +54,6 @@ function normalizar(txt) {
         .replace(/\s+/g, " ");
 }
 
-// 📥 DESCARGAR DATOS LEYENDO COLUMNAS POR POSICIÓN (B, C, D)
 async function cargarDatosSheets() {
     const ahora = Date.now();
     if (cachedData && (ahora - lastFetch) < CACHE_TTL) {
@@ -73,16 +71,14 @@ async function cargarDatosSheets() {
 
             await new Promise((resolve) => {
                 Readable.from(csvText)
-                    .pipe(csv({ headers: false })) // Se lee sin nombres de columnas predefinidos
+                    .pipe(csv({ headers: false }))
                     .on("data", row => {
-                        // Posición física: Col B (row[1]), Col C (row[2]), Col D (row[3])
                         const codigo = row[1] || "";
                         const descripcion = row[2] || "";
                         const precioStr = row[3] || "0";
 
                         const precioLimpio = Number(String(precioStr).replace(/[^0-9]/g, ""));
 
-                        // Descartar encabezados o filas vacías
                         if (descripcion.length > 3 && precioLimpio > 500 && !descripcion.includes("PLACAS DE CARGAS") && !descripcion.includes("MODULOS")) {
                             inventarioGlobal.push({
                                 codigo: codigo,
@@ -114,20 +110,21 @@ app.get("/", (req, res) => {
 app.post("/api/cotizar", async (req, res) => {
     try {
         const { consulta, tipoServicio } = req.body;
-        const textoNorm = normalizar(consulta);
+        const textoNorm = normalizar(consulta || "");
         const esIphone = textoNorm.includes("iphone") || textoNorm.includes("apple");
 
-        // Pin de Carga
-        if (tipoServicio === "pin_carga" || textoNorm.includes("pin")) {
+        // ⚡ 1. PIN DE CARGA (PRECIO FIJO DIRECTO)
+        if (tipoServicio === "pin") {
             const precio = esIphone ? 50000 : 30000;
+            const modeloFormateado = consulta ? consulta.toUpperCase() : (esIphone ? "iPhone" : "Android");
             return res.json({
                 tipo: "servicio_fijo",
-                servicio: `Cambio de Pin de Carga (${esIphone ? "iPhone" : "Android"})`,
+                servicio: `Cambio de Pin de Carga - ${modeloFormateado}`,
                 precioFinal: precio
             });
         }
 
-        // Servicios Fijos (FRP, Windows, Office, etc.)
+        // ⚡ 2. SERVICIOS FIJOS (FRP, WINDOWS, OFFICE, ETC.)
         if (SERVICIOS_FIJOS[tipoServicio]) {
             return res.json({
                 tipo: "servicio_fijo",
@@ -136,18 +133,29 @@ app.post("/api/cotizar", async (req, res) => {
             });
         }
 
-        // Búsqueda de Módulos / Pantallas
+        // 📱 3. BUSCADOR DE MÓDULOS / PANTALLAS (FILTRO STRICTO)
         const inventario = await cargarDatosSheets();
         const palabrasClave = textoNorm.split(" ").filter(p => p.length > 0);
 
         const coincidencias = inventario.filter(item => {
+            if (tipoServicio === "pantalla") {
+                // SOLO buscar en la pestaña MODULOS
+                if (item.categoria !== "MODULOS") return false;
+                
+                // Descartar palabras no deseadas
+                const desc = item.descripcionNorm;
+                if (desc.includes("placa") || desc.includes("flex") || desc.includes("lente") || desc.includes("pin") || desc.includes("bateria")) {
+                    return false;
+                }
+            }
+
             return palabrasClave.every(palabra => item.descripcionNorm.includes(palabra));
         });
 
         if (coincidencias.length === 0) {
             return res.json({
                 encontrado: false,
-                mensaje: "No se encontró el repuesto en el catálogo automático."
+                mensaje: "No se encontró el módulo en el catálogo automático."
             });
         }
 
