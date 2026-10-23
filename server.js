@@ -23,8 +23,10 @@ const SERVICIOS_FIJOS = {
 // 📁 CONFIGURACIÓN DE GOOGLE SHEETS DE UNV (Agregá los GIDs de cada pestaña)
 const SHEET_ID = "17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC"; // Tu Hoja de UNV
 const GIDS_PROVEEDOR = [
-    { nombre: "MODULOS", gid: "1868161265" }, // GID Pestaña Módulos
-    { nombre: "PLACAS Y LENTES", gid: "785555649" } // GID Pestaña Placas
+    { nombre: "MODULOS MECANICO", gid: "785555649" },// GID Pestaña Módulos Mecanicos
+    { nombre: "MODULOS", gid: "1766941416" }, // GID Pestaña Módulos
+    { nombre: "FLEX", gid: "1346168709" }, // GID Pestaña Flex
+    { nombre: "PLACAS Y LENTES", gid: "1868161265" } // GID Pestaña Placas
 ];
 
 // 🔄 CACHÉ EN MEMORIA (10 MINUTOS TTL)
