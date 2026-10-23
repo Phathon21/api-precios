@@ -2,9 +2,16 @@ import express from "express";
 import fetch from "node-fetch";
 import csv from "csv-parser";
 import { Readable } from "stream";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const app = express();
 app.use(express.json());
+
+// 📁 CONFIGURACIÓN PARA SERVIR LA PÁGINA WEB (HTML)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+app.use(express.static(path.join(__dirname, "public")));
 
 // 💳 COSTOS FLETES Y MANO DE OBRA
 const COSTO_ENVIO = 12000;
@@ -20,13 +27,11 @@ const SERVICIOS_FIJOS = {
     office: { nombre: "Instalación Paquete Office", precio: 15000 }
 };
 
-// 📁 CONFIGURACIÓN DE GOOGLE SHEETS DE UNV (Agregá los GIDs de cada pestaña)
-const SHEET_ID = "17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC"; // Tu Hoja de UNV
+// 📁 CONFIGURACIÓN DE GOOGLE SHEETS DE UNV
+const SHEET_ID = "17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC"; 
 const GIDS_PROVEEDOR = [
-    { nombre: "MODULOS MECANICO", gid: "785555649" },// GID Pestaña Módulos Mecanicos
-    { nombre: "MODULOS", gid: "1766941416" }, // GID Pestaña Módulos
-    { nombre: "FLEX", gid: "1346168709" }, // GID Pestaña Flex
-    { nombre: "PLACAS Y LENTES", gid: "1868161265" } // GID Pestaña Placas
+    { nombre: "MODULOS", gid: "1868161265" },
+    { nombre: "PLACAS Y LENTES", gid: "785555649" }
 ];
 
 // 🔄 CACHÉ EN MEMORIA (10 MINUTOS TTL)
@@ -40,7 +45,6 @@ function calcularPrecio(costoBase, esIphone = false) {
     if (!base || base <= 0) return 0;
 
     const manoDeObra = esIphone ? MO_IPHONE : MO_ANDROID;
-    // Fórmula: ((Base + Envío) * 2) + Mano de Obra
     return Math.round(((base + COSTO_ENVIO) * 2) + manoDeObra);
 }
 
@@ -73,7 +77,6 @@ async function cargarDatosSheets() {
                 Readable.from(csvText)
                     .pipe(csv())
                     .on("data", row => {
-                        // Mapeo adaptado a las columnas (COD, DESCRIPCION/PLACA, PRECIO)
                         const descripcion = row["MODULOS"] || row["PLACAS DE CARGAS"] || row["DESCRIPCION"] || row["C"] || "";
                         const precioStr = row["PRECIO"] || row["D"] || "0";
 
@@ -101,6 +104,11 @@ async function cargarDatosSheets() {
     return inventarioGlobal;
 }
 
+// 🎯 ROUTE PRINCIPAL (SERVIR EL INDEX.HTML)
+app.get("/", (req, res) => {
+    res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
 // 🎯 ENDPOINT CONSULTA DE PRECIOS Y SERVICIOS
 app.post("/api/cotizar", async (req, res) => {
     try {
@@ -108,7 +116,6 @@ app.post("/api/cotizar", async (req, res) => {
         const textoNorm = normalizar(consulta);
         const esIphone = textoNorm.includes("iphone") || textoNorm.includes("apple");
 
-        // 1. PIN DE CARGA (Precio Fijo según SO)
         if (tipoServicio === "pin_carga" || textoNorm.includes("pin") || textoNorm.includes("carga")) {
             const precio = esIphone ? 50000 : 30000;
             return res.json({
@@ -119,7 +126,6 @@ app.post("/api/cotizar", async (req, res) => {
             });
         }
 
-        // 2. OTROS SERVICIOS FIJOS
         if (SERVICIOS_FIJOS[tipoServicio]) {
             return res.json({
                 tipo: "servicio_fijo",
@@ -128,7 +134,6 @@ app.post("/api/cotizar", async (req, res) => {
             });
         }
 
-        // 3. BUSCAR EN PROVEEDOR (REPUESTOS)
         const inventario = await cargarDatosSheets();
         const palabrasClave = textoNorm.split(" ").filter(p => p.length > 1);
 
@@ -143,7 +148,6 @@ app.post("/api/cotizar", async (req, res) => {
             });
         }
 
-        // Dar formato a las opciones encontradas con la fórmula
         const resultados = coincidencias.slice(0, 5).map(item => {
             const precioCliente = calcularPrecio(item.precioBase, esIphone);
             return {
