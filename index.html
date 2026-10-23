@@ -3,100 +3,121 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EA Informática - Presupuestos y Pedidos</title>
+    <title>EA Informática - Presupuestos & Reparaciones</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100 font-sans antialiased text-gray-800">
 
+    <!-- ENCABEZADO CON LOGO -->
     <header class="bg-blue-600 text-white p-4 shadow-md text-center sticky top-0 z-50">
-        <h1 class="text-xl font-bold flex items-center justify-center gap-2">
-            <i class="fa-solid fa-mobile-screen-button"></i> EA Informática & Reparaciones
-        </h1>
-        <p class="text-xs text-blue-100 mt-1">Presupuestos al instante & Solicitud de Servicio</p>
+        <div class="flex items-center justify-center gap-3">
+            <img src="logo.jpg" alt="Logo" class="h-10 w-10 rounded-full border-2 border-white object-cover" onerror="this.style.display='none'">
+            <h1 class="text-xl font-bold">EA Informática & Reparaciones</h1>
+        </div>
+        <p class="text-xs text-blue-100 mt-1">Presupuestos e Inicios de Servicio al instante</p>
     </header>
 
     <main class="max-w-md mx-auto p-4 pb-28">
 
-        <!-- PASO 1: TIPO DE SERVICIO -->
+        <!-- 1. SELECCIÓN PRINCIPAL (3 OPCIONES) -->
         <section class="bg-white rounded-xl shadow-sm p-4 mb-4">
-            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">1. ¿Qué servicio necesitas?</h2>
+            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">1. Selecciona lo que necesitas:</h2>
             
-            <div class="grid grid-cols-2 gap-3">
-                <button onclick="seleccionarServicio('pantalla')" id="btn-pantalla" class="option-btn border-2 border-gray-200 rounded-lg p-3 text-center hover:border-blue-500 focus:outline-none transition">
+            <div class="grid grid-cols-3 gap-2">
+                <button onclick="seleccionarPrincipal('pantalla')" id="btn-pantalla" class="option-btn border-2 border-gray-200 rounded-lg p-2.5 text-center hover:border-blue-500 transition">
                     <i class="fa-solid fa-mobile-retro text-2xl text-blue-600 mb-1"></i>
-                    <div class="text-sm font-bold">Pantalla / Módulo</div>
-                    <div class="text-xs text-gray-400">Roturas, táctil, display</div>
+                    <div class="text-xs font-bold">Módulos / Pantallas</div>
                 </button>
 
-                <button onclick="seleccionarServicio('pin')" id="btn-pin" class="option-btn border-2 border-gray-200 rounded-lg p-3 text-center hover:border-blue-500 focus:outline-none transition">
+                <button onclick="seleccionarPrincipal('pin')" id="btn-pin" class="option-btn border-2 border-gray-200 rounded-lg p-2.5 text-center hover:border-blue-500 transition">
                     <i class="fa-solid fa-plug-circle-bolt text-2xl text-yellow-500 mb-1"></i>
-                    <div class="text-sm font-bold">Pin de Carga</div>
-                    <div class="text-xs text-gray-400">No carga / Falso contacto</div>
+                    <div class="text-xs font-bold">Pin de Carga</div>
                 </button>
 
-                <button onclick="seleccionarServicio('frp')" id="btn-frp" class="option-btn border-2 border-gray-200 rounded-lg p-3 text-center hover:border-blue-500 focus:outline-none transition">
-                    <i class="fa-solid fa-unlock-keyhole text-2xl text-red-500 mb-1"></i>
-                    <div class="text-sm font-bold">Cuenta Google / FRP</div>
-                    <div class="text-xs text-gray-400">Bloqueo de fábrica</div>
-                </button>
-
-                <button onclick="seleccionarServicio('otros')" id="btn-otros" class="option-btn border-2 border-gray-200 rounded-lg p-3 text-center hover:border-blue-500 focus:outline-none transition">
-                    <i class="fa-solid fa-laptop-code text-2xl text-green-500 mb-1"></i>
-                    <div class="text-sm font-bold">Software / PC</div>
-                    <div class="text-xs text-gray-400">Windows, Virus, Office</div>
+                <button onclick="seleccionarPrincipal('servicios')" id="btn-servicios" class="option-btn border-2 border-gray-200 rounded-lg p-2.5 text-center hover:border-blue-500 transition">
+                    <i class="fa-solid fa-screws-tilting text-2xl text-green-500 mb-1"></i>
+                    <div class="text-xs font-bold">Servicios</div>
                 </button>
             </div>
         </section>
 
-        <!-- PASO 2: INGRESAR MODELO -->
-        <section id="sec-modelo" class="bg-white rounded-xl shadow-sm p-4 mb-4 hidden">
-            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">2. Modelo de tu celular</h2>
-            <p class="text-xs text-gray-500 mb-3">Escribe la marca y modelo (Ejemplo: Samsung A32, Moto G8, iPhone 11):</p>
+        <!-- SUBMENU DE SERVICIOS (PC vs CELULAR) -->
+        <section id="sec-sub-servicios" class="bg-white rounded-xl shadow-sm p-4 mb-4 hidden">
+            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Tipo de Servicio:</h2>
             
+            <div class="grid grid-cols-2 gap-2 mb-3">
+                <button onclick="mostrarSubServicios('pc')" id="btn-sub-pc" class="border p-2 rounded-lg text-xs font-bold text-gray-700 bg-gray-50 flex items-center justify-center gap-1">
+                    <i class="fa-solid fa-desktop text-blue-500"></i> Servicios de PC
+                </button>
+                <button onclick="mostrarSubServicios('celular')" id="btn-sub-celular" class="border p-2 rounded-lg text-xs font-bold text-gray-700 bg-gray-50 flex items-center justify-center gap-1">
+                    <i class="fa-solid fa-mobile text-green-500"></i> Servicios Celular
+                </button>
+            </div>
+
+            <!-- Opciones PC -->
+            <div id="opciones-pc" class="space-y-2 hidden">
+                <button onclick="cotizarServicioFijo('windows')" class="w-full text-left border rounded-lg p-2.5 text-xs font-bold flex justify-between items-center hover:bg-blue-50">
+                    <span>💻 Formateo / Cambio de Windows</span>
+                    <span class="text-blue-600 font-extrabold">$25.000</span>
+                </button>
+                <button onclick="cotizarServicioFijo('office')" class="w-full text-left border rounded-lg p-2.5 text-xs font-bold flex justify-between items-center hover:bg-blue-50">
+                    <span>📄 Instalación Paquete Office</span>
+                    <span class="text-blue-600 font-extrabold">$15.000</span>
+                </button>
+            </div>
+
+            <!-- Opciones Celular -->
+            <div id="opciones-celular" class="space-y-2 hidden">
+                <button onclick="cotizarServicioFijo('frp')" class="w-full text-left border rounded-lg p-2.5 text-xs font-bold flex justify-between items-center hover:bg-blue-50">
+                    <span>🔓 Cuenta Google / FRP</span>
+                    <span class="text-blue-600 font-extrabold">$35.000</span>
+                </button>
+                <button onclick="cotizarServicioFijo('software_celular')" class="w-full text-left border rounded-lg p-2.5 text-xs font-bold flex justify-between items-center hover:bg-blue-50">
+                    <span>📲 Reinstalación de Software</span>
+                    <span class="text-blue-600 font-extrabold">$25.000</span>
+                </button>
+                <button onclick="cotizarServicioFijo('virus')" class="w-full text-left border rounded-lg p-2.5 text-xs font-bold flex justify-between items-center hover:bg-blue-50">
+                    <span>🛡️ Limpieza / Eliminación de Virus</span>
+                    <span class="text-blue-600 font-extrabold">$8.000</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- INPUT BUSCADOR DE MODELO DE CELULAR -->
+        <section id="sec-modelo" class="bg-white rounded-xl shadow-sm p-4 mb-4 hidden">
+            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Ingresa Modelo del Celular:</h2>
             <div class="flex gap-2">
-                <input type="text" id="input-modelo" placeholder="Ej: Samsung A10" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                <button onclick="consultarPrecio()" class="bg-blue-600 text-white px-4 rounded-lg text-sm font-bold hover:bg-blue-700 transition">
+                <input type="text" id="input-modelo" placeholder="Ej: A32, G8, iPhone 11" class="w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                <button onclick="consultarModelo()" class="bg-blue-600 text-white px-4 rounded-lg text-sm font-bold hover:bg-blue-700">
                     Buscar
                 </button>
             </div>
         </section>
 
-        <!-- SUBMENU SERVICIOS PC / SOFTWARE -->
-        <section id="sec-servicios-fijos" class="bg-white rounded-xl shadow-sm p-4 mb-4 hidden">
-            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Selecciona el trabajo exacto:</h2>
-            <select id="select-servicio-fijo" onchange="seleccionarServicioFijo()" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                <option value="">-- Seleccionar servicio --</option>
-                <option value="software_celular">Reinstalación Software Celular ($25.000)</option>
-                <option value="virus">Eliminación de Virus ($8.000)</option>
-                <option value="windows">Formateo e Instalación de Windows ($25.000)</option>
-                <option value="office">Instalación Paquete Office ($15.000)</option>
-            </select>
-        </section>
-
-        <!-- PASO 3: RESULTADOS Y CALIDADES -->
+        <!-- MUESTRA DE RESULTADOS -->
         <section id="sec-resultados" class="bg-white rounded-xl shadow-sm p-4 mb-4 hidden">
-            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">3. Opción Seleccionada</h2>
+            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Resultado de Cotización:</h2>
             <div id="lista-opciones" class="space-y-2"></div>
         </section>
 
-        <!-- PASO 4: DATOS CLIENTE Y PAGO -->
+        <!-- DATOS DE PAGO Y CONFIRMACIÓN -->
         <section id="sec-pago" class="bg-white rounded-xl shadow-sm p-4 mb-4 hidden">
-            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">4. Tus Datos y Forma de Pago</h2>
+            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Tus Datos y Forma de Pago:</h2>
             
             <div class="space-y-3">
                 <div>
-                    <label class="block text-xs font-semibold text-gray-600 mb-1">Tu Nombre Completo:</label>
-                    <input type="text" id="cliente-nombre" placeholder="Ej: Carlos Gómez" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm outline-none">
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Nombre Completo:</label>
+                    <input type="text" id="cliente-nombre" placeholder="Ej: Juan Pérez" class="w-full border rounded-lg p-2.5 text-sm outline-none">
                 </div>
 
                 <div>
-                    <label class="block text-xs font-semibold text-gray-600 mb-1">Método de Pago:</label>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Forma de Pago:</label>
                     <div class="grid grid-cols-2 gap-2">
-                        <label class="border rounded-lg p-2.5 flex items-center gap-2 cursor-pointer text-sm">
+                        <label class="border rounded-lg p-2.5 flex items-center gap-2 cursor-pointer text-xs font-bold">
                             <input type="radio" name="pago" value="Efectivo" checked onclick="toggleCBU(false)"> Efectivo
                         </label>
-                        <label class="border rounded-lg p-2.5 flex items-center gap-2 cursor-pointer text-sm">
+                        <label class="border rounded-lg p-2.5 flex items-center gap-2 cursor-pointer text-xs font-bold">
                             <input type="radio" name="pago" value="Transferencia" onclick="toggleCBU(true)"> Transferencia
                         </label>
                     </div>
@@ -106,18 +127,17 @@
                     <p class="font-bold mb-1">📌 Datos para transferencia:</p>
                     <p><strong>Alias:</strong> EA.INFORMATICA.MP</p>
                     <p><strong>CBU:</strong> 0000003100012345678901</p>
-                    <p class="text-gray-500 mt-1">* Te pediremos el comprobante por WhatsApp al confirmar.</p>
                 </div>
             </div>
         </section>
 
     </main>
 
-    <!-- BARRA INFERIOR FIJA CON EL PRECIO Y BOTÓN DE CONFIRMACIÓN -->
+    <!-- BARRA INFERIOR FIJA -->
     <div id="bar-bottom" class="fixed bottom-0 left-0 right-0 bg-white border-t p-3 shadow-lg max-w-md mx-auto hidden">
         <div class="flex items-center justify-between gap-3">
             <div>
-                <div class="text-xs text-gray-400">Total Estimado:</div>
+                <div class="text-xs text-gray-400">Precio Final:</div>
                 <div id="precio-total" class="text-xl font-extrabold text-blue-600">$0</div>
             </div>
             <button onclick="enviarPedido()" class="bg-green-600 text-white font-bold py-2.5 px-5 rounded-xl hover:bg-green-700 transition flex items-center gap-2 text-sm shadow-md">
@@ -127,52 +147,51 @@
     </div>
 
     <script>
-        let servicioActual = '';
+        let modoActual = '';
         let opcionSeleccionada = null;
 
-        function seleccionarServicio(tipo) {
-            servicioActual = tipo;
+        function seleccionarPrincipal(tipo) {
+            modoActual = tipo;
             document.querySelectorAll('.option-btn').forEach(b => b.classList.remove('border-blue-500', 'bg-blue-50'));
             document.getElementById(`btn-${tipo}`).classList.add('border-blue-500', 'bg-blue-50');
 
+            document.getElementById('sec-sub-servicios').classList.add('hidden');
             document.getElementById('sec-modelo').classList.add('hidden');
-            document.getElementById('sec-servicios-fijos').classList.add('hidden');
             document.getElementById('sec-resultados').classList.add('hidden');
             document.getElementById('sec-pago').classList.add('hidden');
             document.getElementById('bar-bottom').classList.add('hidden');
 
             if (tipo === 'pantalla' || tipo === 'pin') {
                 document.getElementById('sec-modelo').classList.remove('hidden');
-            } else if (tipo === 'frp') {
-                mostrarPrecioFijo("Eliminación Cuenta Google (FRP)", 35000);
-            } else if (tipo === 'otros') {
-                document.getElementById('sec-servicios-fijos').classList.remove('hidden');
+            } else if (tipo === 'servicios') {
+                document.getElementById('sec-sub-servicios').classList.remove('hidden');
             }
         }
 
-        function seleccionarServicioFijo() {
-            const val = document.getElementById('select-servicio-fijo').value;
-            const precios = { software_celular: 25000, virus: 8000, windows: 25000, office: 15000 };
-            const nombres = { 
-                software_celular: "Reinstalación Software Celular", 
-                virus: "Eliminación de Virus", 
-                windows: "Instalación de Windows", 
-                office: "Instalación Paquete Office" 
-            };
-
-            if (val && precios[val]) {
-                mostrarPrecioFijo(nombres[val], precios[val]);
-            }
+        function mostrarSubServicios(categoria) {
+            document.getElementById('opciones-pc').classList.toggle('hidden', categoria !== 'pc');
+            document.getElementById('opciones-celular').classList.toggle('hidden', categoria !== 'celular');
         }
 
-        async function consultarPrecio() {
+        async function cotizarServicioFijo(clave) {
+            const res = await fetch('/api/cotizar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tipoServicio: clave })
+            });
+
+            const data = await res.json();
+            mostrarResultadoFijo(data.servicio, data.precioFinal);
+        }
+
+        async function consultarModelo() {
             const modelo = document.getElementById('input-modelo').value.trim();
-            if (!modelo) return alert("Por favor escribe el modelo de tu equipo.");
+            if (!modelo) return alert("Ingresa un modelo (ej: A32, G8, iPhone 11)");
 
             const res = await fetch('/api/cotizar', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ consulta: modelo, tipoServicio: servicioActual })
+                body: JSON.stringify({ consulta: modelo, tipoServicio: modoActual })
             });
 
             const data = await res.json();
@@ -180,21 +199,20 @@
             contenedor.innerHTML = '';
 
             if (data.tipo === "servicio_fijo") {
-                mostrarPrecioFijo(data.servicio, data.precioFinal);
+                mostrarResultadoFijo(data.servicio, data.precioFinal);
                 return;
             }
 
             if (!data.encontrado || data.resultados.length === 0) {
-                contenedor.innerHTML = `<p class="text-sm text-red-500 font-semibold">❌ No encontramos ese modelo exacto en catálogo automático. No te preocupes, confirma para que un técnico te cotice manualmente.</p>`;
+                contenedor.innerHTML = `<p class="text-xs text-red-500 font-semibold p-2">❌ No se encontró coincidencia automática para "${modelo}". Confirma el pedido para que un técnico cotice manualmente.</p>`;
                 opcionSeleccionada = { repuesto: `Consulta Manual (${modelo})`, precio: 0 };
                 actualizarBarra(0);
             } else {
-                data.resultados.forEach((item, index) => {
+                data.resultados.forEach((item) => {
                     contenedor.innerHTML += `
                         <div onclick="elegirOpcion('${item.repuesto}', ${item.precioCliente}, this)" class="card-opcion border rounded-lg p-3 cursor-pointer hover:border-blue-500 transition">
-                            <div class="font-bold text-sm text-gray-800">${item.repuesto}</div>
-                            <div class="text-xs text-gray-500">${item.categoria}</div>
-                            <div class="text-blue-600 font-extrabold text-base mt-1">$${item.precioCliente.toLocaleString('es-AR')}</div>
+                            <div class="font-bold text-xs text-gray-800">${item.repuesto}</div>
+                            <div class="text-blue-600 font-extrabold text-sm mt-1">$${item.precioCliente.toLocaleString('es-AR')}</div>
                         </div>`;
                 });
             }
@@ -202,12 +220,12 @@
             document.getElementById('sec-resultados').classList.remove('hidden');
         }
 
-        function mostrarPrecioFijo(nombre, precio) {
+        function mostrarResultadoFijo(nombre, precio) {
             const contenedor = document.getElementById('lista-opciones');
             contenedor.innerHTML = `
                 <div class="border border-blue-500 bg-blue-50 rounded-lg p-3">
-                    <div class="font-bold text-sm text-gray-800">${nombre}</div>
-                    <div class="text-blue-600 font-extrabold text-lg mt-1">$${precio.toLocaleString('es-AR')}</div>
+                    <div class="font-bold text-xs text-gray-800">${nombre}</div>
+                    <div class="text-blue-600 font-extrabold text-base mt-1">$${precio.toLocaleString('es-AR')}</div>
                 </div>`;
             
             opcionSeleccionada = { repuesto: nombre, precio: precio };
@@ -234,12 +252,11 @@
 
         function enviarPedido() {
             const nombre = document.getElementById('cliente-nombre').value.trim();
-            if (!nombre) return alert("Por favor escribe tu nombre completo.");
+            if (!nombre) return alert("Ingresa tu nombre completo.");
 
             const pago = document.querySelector('input[name="pago"]:checked').value;
             const mensaje = `👋 ¡Hola! Quiero realizar un pedido:\n\n👤 *Cliente:* ${nombre}\n🔧 *Servicio/Repuesto:* ${opcionSeleccionada.repuesto}\n💰 *Monto Estimado:* $${opcionSeleccionada.precio.toLocaleString('es-AR')}\n💳 *Método de Pago:* ${pago}`;
 
-            // Redirige al WhatsApp del Taller con el pedido armado
             window.location.href = `https://wa.me/?text=${encodeURIComponent(mensaje)}`;
         }
     </script>
