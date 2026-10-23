@@ -3,32 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Presupuesto y Turnos - Taller de Reparaciones</title>
-    <!-- Tailwind CSS (Estilo visual rápido y moderno) -->
+    <title>EA Informática - Presupuestos y Pedidos</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100 font-sans antialiased text-gray-800">
 
-    <!-- HEADER / ENCABEZADO -->
     <header class="bg-blue-600 text-white p-4 shadow-md text-center sticky top-0 z-50">
         <h1 class="text-xl font-bold flex items-center justify-center gap-2">
             <i class="fa-solid fa-mobile-screen-button"></i> EA Informática & Reparaciones
         </h1>
-        <p class="text-xs text-blue-100 mt-1">Presupuestos al instante & Solicitud de Reparación</p>
+        <p class="text-xs text-blue-100 mt-1">Presupuestos al instante & Solicitud de Servicio</p>
     </header>
 
-    <main class="max-w-md mx-auto p-4 pb-24">
+    <main class="max-w-md mx-auto p-4 pb-28">
 
-        <!-- PASO 1: SELECCIONAR SERVICIO -->
+        <!-- PASO 1: TIPO DE SERVICIO -->
         <section class="bg-white rounded-xl shadow-sm p-4 mb-4">
-            <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">1. ¿Qué servicio necesitas?</h2>
+            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">1. ¿Qué servicio necesitas?</h2>
             
             <div class="grid grid-cols-2 gap-3">
                 <button onclick="seleccionarServicio('pantalla')" id="btn-pantalla" class="option-btn border-2 border-gray-200 rounded-lg p-3 text-center hover:border-blue-500 focus:outline-none transition">
                     <i class="fa-solid fa-mobile-retro text-2xl text-blue-600 mb-1"></i>
                     <div class="text-sm font-bold">Pantalla / Módulo</div>
-                    <div class="text-xs text-gray-400">Roturas, tactil, display</div>
+                    <div class="text-xs text-gray-400">Roturas, táctil, display</div>
                 </button>
 
                 <button onclick="seleccionarServicio('pin')" id="btn-pin" class="option-btn border-2 border-gray-200 rounded-lg p-3 text-center hover:border-blue-500 focus:outline-none transition">
@@ -51,10 +49,10 @@
             </div>
         </section>
 
-        <!-- PASO 2: INGRESAR MODELO DE CELULAR (SI APLICA) -->
+        <!-- PASO 2: INGRESAR MODELO -->
         <section id="sec-modelo" class="bg-white rounded-xl shadow-sm p-4 mb-4 hidden">
-            <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">2. Modelo de tu celular</h2>
-            <p class="text-xs text-gray-400 mb-3">Escribe la marca y modelo (Ejemplo: Samsung A32, Moto G8 Play, iPhone 11):</p>
+            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">2. Modelo de tu celular</h2>
+            <p class="text-xs text-gray-500 mb-3">Escribe la marca y modelo (Ejemplo: Samsung A32, Moto G8, iPhone 11):</p>
             
             <div class="flex gap-2">
                 <input type="text" id="input-modelo" placeholder="Ej: Samsung A10" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
@@ -64,9 +62,9 @@
             </div>
         </section>
 
-        <!-- SUB-MENU OTROS SERVICIOS -->
+        <!-- SUBMENU SERVICIOS PC / SOFTWARE -->
         <section id="sec-servicios-fijos" class="bg-white rounded-xl shadow-sm p-4 mb-4 hidden">
-            <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Selecciona el trabajo exacto:</h2>
+            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Selecciona el trabajo exacto:</h2>
             <select id="select-servicio-fijo" onchange="seleccionarServicioFijo()" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
                 <option value="">-- Seleccionar servicio --</option>
                 <option value="software_celular">Reinstalación Software Celular ($25.000)</option>
@@ -76,19 +74,19 @@
             </select>
         </section>
 
-        <!-- PASO 3: MOSTRAR RESULTADOS Y CALIDADES -->
+        <!-- PASO 3: RESULTADOS Y CALIDADES -->
         <section id="sec-resultados" class="bg-white rounded-xl shadow-sm p-4 mb-4 hidden">
-            <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">3. Cotización Disponible</h2>
+            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">3. Opción Seleccionada</h2>
             <div id="lista-opciones" class="space-y-2"></div>
         </section>
 
-        <!-- PASO 4: DATOS DEL CLIENTE Y PAGO -->
+        <!-- PASO 4: DATOS CLIENTE Y PAGO -->
         <section id="sec-pago" class="bg-white rounded-xl shadow-sm p-4 mb-4 hidden">
-            <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">4. Tus Datos y Forma de Pago</h2>
+            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">4. Tus Datos y Forma de Pago</h2>
             
             <div class="space-y-3">
                 <div>
-                    <label class="block text-xs font-semibold text-gray-600 mb-1">Nombre Completo:</label>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Tu Nombre Completo:</label>
                     <input type="text" id="cliente-nombre" placeholder="Ej: Carlos Gómez" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm outline-none">
                 </div>
 
@@ -104,12 +102,11 @@
                     </div>
                 </div>
 
-                <!-- CBU DESPLEGABLE -->
                 <div id="box-cbu" class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 hidden">
                     <p class="font-bold mb-1">📌 Datos para transferencia:</p>
-                    <p><strong>Alias:</strong> TU.ALIAS.AQUI</p>
+                    <p><strong>Alias:</strong> EA.INFORMATICA.MP</p>
                     <p><strong>CBU:</strong> 0000003100012345678901</p>
-                    <p class="text-gray-500 mt-1">* Por favor envía el comprobante al finalizar el pedido.</p>
+                    <p class="text-gray-500 mt-1">* Te pediremos el comprobante por WhatsApp al confirmar.</p>
                 </div>
             </div>
         </section>
@@ -129,7 +126,6 @@
         </div>
     </div>
 
-    <!-- JAVASCRIPT DEL CLIENTE -->
     <script>
         let servicioActual = '';
         let opcionSeleccionada = null;
@@ -154,6 +150,21 @@
             }
         }
 
+        function seleccionarServicioFijo() {
+            const val = document.getElementById('select-servicio-fijo').value;
+            const precios = { software_celular: 25000, virus: 8000, windows: 25000, office: 15000 };
+            const nombres = { 
+                software_celular: "Reinstalación Software Celular", 
+                virus: "Eliminación de Virus", 
+                windows: "Instalación de Windows", 
+                office: "Instalación Paquete Office" 
+            };
+
+            if (val && precios[val]) {
+                mostrarPrecioFijo(nombres[val], precios[val]);
+            }
+        }
+
         async function consultarPrecio() {
             const modelo = document.getElementById('input-modelo').value.trim();
             if (!modelo) return alert("Por favor escribe el modelo de tu equipo.");
@@ -174,10 +185,63 @@
             }
 
             if (!data.encontrado || data.resultados.length === 0) {
-                contenedor.innerHTML = `<p class="text-sm text-red-500 font-semibold">❌ No encontramos ese modelo exacto en catálogo. No te preocupes, presiona el botón para consultar manualmente con un técnico.</p>`;
+                contenedor.innerHTML = `<p class="text-sm text-red-500 font-semibold">❌ No encontramos ese modelo exacto en catálogo automático. No te preocupes, confirma para que un técnico te cotice manualmente.</p>`;
                 opcionSeleccionada = { repuesto: `Consulta Manual (${modelo})`, precio: 0 };
                 actualizarBarra(0);
             } else {
                 data.resultados.forEach((item, index) => {
                     contenedor.innerHTML += `
-                        <label class="border rounded
+                        <div onclick="elegirOpcion('${item.repuesto}', ${item.precioCliente}, this)" class="card-opcion border rounded-lg p-3 cursor-pointer hover:border-blue-500 transition">
+                            <div class="font-bold text-sm text-gray-800">${item.repuesto}</div>
+                            <div class="text-xs text-gray-500">${item.categoria}</div>
+                            <div class="text-blue-600 font-extrabold text-base mt-1">$${item.precioCliente.toLocaleString('es-AR')}</div>
+                        </div>`;
+                });
+            }
+
+            document.getElementById('sec-resultados').classList.remove('hidden');
+        }
+
+        function mostrarPrecioFijo(nombre, precio) {
+            const contenedor = document.getElementById('lista-opciones');
+            contenedor.innerHTML = `
+                <div class="border border-blue-500 bg-blue-50 rounded-lg p-3">
+                    <div class="font-bold text-sm text-gray-800">${nombre}</div>
+                    <div class="text-blue-600 font-extrabold text-lg mt-1">$${precio.toLocaleString('es-AR')}</div>
+                </div>`;
+            
+            opcionSeleccionada = { repuesto: nombre, precio: precio };
+            actualizarBarra(precio);
+            document.getElementById('sec-resultados').classList.remove('hidden');
+        }
+
+        function elegirOpcion(nombre, precio, elemento) {
+            document.querySelectorAll('.card-opcion').forEach(c => c.classList.remove('border-blue-500', 'bg-blue-50'));
+            elemento.classList.add('border-blue-500', 'bg-blue-50');
+            opcionSeleccionada = { repuesto: nombre, precio: precio };
+            actualizarBarra(precio);
+        }
+
+        function actualizarBarra(precio) {
+            document.getElementById('precio-total').innerText = `$${precio.toLocaleString('es-AR')}`;
+            document.getElementById('sec-pago').classList.remove('hidden');
+            document.getElementById('bar-bottom').classList.remove('hidden');
+        }
+
+        function toggleCBU(mostrar) {
+            document.getElementById('box-cbu').classList.toggle('hidden', !mostrar);
+        }
+
+        function enviarPedido() {
+            const nombre = document.getElementById('cliente-nombre').value.trim();
+            if (!nombre) return alert("Por favor escribe tu nombre completo.");
+
+            const pago = document.querySelector('input[name="pago"]:checked').value;
+            const mensaje = `👋 ¡Hola! Quiero realizar un pedido:\n\n👤 *Cliente:* ${nombre}\n🔧 *Servicio/Repuesto:* ${opcionSeleccionada.repuesto}\n💰 *Monto Estimado:* $${opcionSeleccionada.precio.toLocaleString('es-AR')}\n💳 *Método de Pago:* ${pago}`;
+
+            // Redirige al WhatsApp del Taller con el pedido armado
+            window.location.href = `https://wa.me/?text=${encodeURIComponent(mensaje)}`;
+        }
+    </script>
+</body>
+</html>
