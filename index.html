@@ -86,7 +86,7 @@
 
         <!-- INPUT BUSCADOR DE MODELO DE CELULAR -->
         <section id="sec-modelo" class="bg-white rounded-xl shadow-sm p-4 mb-4 hidden">
-            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Ingresa Modelo del Celular:</h2>
+            <h2 id="titulo-modelo" class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Ingresa Modelo del Celular:</h2>
             <div class="flex gap-2">
                 <input type="text" id="input-modelo" placeholder="Ej: A32, G8, iPhone 11" class="w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500">
                 <button onclick="consultarModelo()" class="bg-blue-600 text-white px-4 rounded-lg text-sm font-bold hover:bg-blue-700">
@@ -123,10 +123,14 @@
                     </div>
                 </div>
 
-                <div id="box-cbu" class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 hidden">
-                    <p class="font-bold mb-1">📌 Datos para transferencia:</p>
-                    <p><strong>Alias:</strong> EA.INFORMATICA.MP</p>
-                    <p><strong>CBU:</strong> 0000003100012345678901</p>
+                <!-- CBU DESPLEGABLE CON TUS DATOS DE UALÁ -->
+                <div id="box-cbu" class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 hidden space-y-1">
+                    <p class="font-bold text-blue-950 mb-1">📌 Datos para transferencia:</p>
+                    <p><strong>Titular:</strong> Jose Maria Abregu</p>
+                    <p><strong>Alias:</strong> EA.uala</p>
+                    <p><strong>CBU:</strong> 3840200500000018450428</p>
+                    <p><strong>Banco:</strong> Ualá Bank S.A.U.</p>
+                    <p class="text-gray-500 text-[10px] mt-1">* Recuerda enviar el comprobante por WhatsApp al confirmar.</p>
                 </div>
             </div>
         </section>
@@ -147,6 +151,9 @@
     </div>
 
     <script>
+        // 💬 PON AQUÍ TU NÚMERO DE WHATSAPP (Con código de país, ej: 5493834123456)
+        const MI_WHATSAPP = "5493854416248"; 
+
         let modoActual = '';
         let opcionSeleccionada = null;
 
@@ -161,7 +168,11 @@
             document.getElementById('sec-pago').classList.add('hidden');
             document.getElementById('bar-bottom').classList.add('hidden');
 
-            if (tipo === 'pantalla' || tipo === 'pin') {
+            if (tipo === 'pantalla') {
+                document.getElementById('titulo-modelo').innerText = "Ingresa Modelo del Celular:";
+                document.getElementById('sec-modelo').classList.remove('hidden');
+            } else if (tipo === 'pin') {
+                document.getElementById('titulo-modelo').innerText = "Ingresa Modelo del Celular para Pin de Carga:";
                 document.getElementById('sec-modelo').classList.remove('hidden');
             } else if (tipo === 'servicios') {
                 document.getElementById('sec-sub-servicios').classList.remove('hidden');
@@ -257,7 +268,11 @@
             const pago = document.querySelector('input[name="pago"]:checked').value;
             const mensaje = `👋 ¡Hola! Quiero realizar un pedido:\n\n👤 *Cliente:* ${nombre}\n🔧 *Servicio/Repuesto:* ${opcionSeleccionada.repuesto}\n💰 *Monto Estimado:* $${opcionSeleccionada.precio.toLocaleString('es-AR')}\n💳 *Método de Pago:* ${pago}`;
 
-            window.location.href = `https://wa.me/?text=${encodeURIComponent(mensaje)}`;
+            const url = MI_WHATSAPP 
+                ? `https://wa.me/${MI_WHATSAPP}?text=${encodeURIComponent(mensaje)}`
+                : `https://wa.me/?text=${encodeURIComponent(mensaje)}`;
+
+            window.location.href = url;
         }
     </script>
 </body>
