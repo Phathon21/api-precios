@@ -8,9 +8,10 @@ import { fileURLToPath } from "url";
 const app = express();
 app.use(express.json());
 
-// 📁 SERVIR ARCHIVOS ESTÁTICOS DESDE LA RAÍZ
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Servir archivos de la raíz (index.html, logo.jpg, etc.)
 app.use(express.static(__dirname));
 
 // 💳 COSTOS FLETES Y MANO DE OBRA
@@ -21,25 +22,23 @@ const MO_IPHONE = 50000;
 // 🛠️ SERVICIOS CON PRECIO FIJO
 const SERVICIOS_FIJOS = {
     frp: { nombre: "Eliminación Cuenta Google (FRP)", precio: 35000 },
-    virus: { nombre: "Eliminación de Virus / Limpieza", precio: 8000 },
-    software_celular: { nombre: "Reinstalación / Cambio de Software", precio: 25000 },
-    windows: { nombre: "Formateo e Instalación de Windows", precio: 25000 },
-    office: { nombre: "Instalación Paquete Office", precio: 15000 }
+    virus: { nombre: "Eliminación de Virus / Limpieza Celular", precio: 8000 },
+    software_celular: { nombre: "Reinstalación / Cambio de Software Celular", precio: 25000 },
+    windows: { nombre: "Formateo e Instalación de Windows (PC)", precio: 25000 },
+    office: { nombre: "Instalación Paquete Office (PC)", precio: 15000 }
 };
 
-// 📁 CONFIGURACIÓN DE GOOGLE SHEETS DE UNV
+// 📁 GOOGLE SHEETS DE UNV (Pestañas configuradas)
 const SHEET_ID = "17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC"; 
 const GIDS_PROVEEDOR = [
     { nombre: "MODULOS", gid: "1868161265" },
     { nombre: "PLACAS Y LENTES", gid: "785555649" }
 ];
 
-// 🔄 CACHÉ EN MEMORIA (10 MINUTOS TTL)
 let cachedData = null;
 let lastFetch = 0;
 const CACHE_TTL = 10 * 60 * 1000;
 
-// 💰 FÓRMULA DE CÁLCULO DE PRECIOS
 function calcularPrecio(costoBase, esIphone = false) {
     const base = Number(String(costoBase).replace(/[^0-9]/g, ""));
     if (!base || base <= 0) return 0;
@@ -48,7 +47,6 @@ function calcularPrecio(costoBase, esIphone = false) {
     return Math.round(((base + COSTO_ENVIO) * 2) + manoDeObra);
 }
 
-// 🧼 NORMALIZAR TEXTO
 function normalizar(txt) {
     if (!txt) return "";
     return txt.toString().toLowerCase().trim()
@@ -57,7 +55,7 @@ function normalizar(txt) {
         .replace(/\s+/g, " ");
 }
 
-// 📥 DESCARGAR DATOS FRESCOS DE GOOGLE SHEETS
+// 📥 DESCARGAR DATOS LEYENDO COLUMNAS POR POSICIÓN (B, C, D)
 async function cargarDatosSheets() {
     const ahora = Date.now();
     if (cachedData && (ahora - lastFetch) < CACHE_TTL) {
@@ -75,17 +73,22 @@ async function cargarDatosSheets() {
 
             await new Promise((resolve) => {
                 Readable.from(csvText)
-                    .pipe(csv())
+                    .pipe(csv({ headers: false })) // Se lee sin nombres de columnas predefinidos
                     .on("data", row => {
-                        const descripcion = row["MODULOS"] || row["PLACAS DE CARGAS"] || row["DESCRIPCION"] || row["C"] || "";
-                        const precioStr = row["PRECIO"] || row["D"] || "0";
+                        // Posición física: Col B (row[1]), Col C (row[2]), Col D (row[3])
+                        const codigo = row[1] || "";
+                        const descripcion = row[2] || "";
+                        const precioStr = row[3] || "0";
 
-                        if (descripcion && precioStr) {
+                        const precioLimpio = Number(String(precioStr).replace(/[^0-9]/g, ""));
+
+                        // Descartar encabezados o filas vacías
+                        if (descripcion.length > 3 && precioLimpio > 500 && !descripcion.includes("PLACAS DE CARGAS") && !descripcion.includes("MODULOS")) {
                             inventarioGlobal.push({
-                                codigo: row["COD"] || row["B"] || "",
-                                descripcion: descripcion,
+                                codigo: codigo,
+                                descripcion: descripcion.trim(),
                                 descripcionNorm: normalizar(descripcion),
-                                precioBase: Number(String(precioStr).replace(/[^0-9]/g, "")),
+                                precioBase: precioLimpio,
                                 categoria: pestaña.nombre
                             });
                         }
@@ -104,28 +107,27 @@ async function cargarDatosSheets() {
     return inventarioGlobal;
 }
 
-// 🎯 RUTA PRINCIPAL (ENTREGA INDEX.HTML DESDE LA RAÍZ)
 app.get("/", (req, res) => {
     res.sendFile(path.join(__dirname, "index.html"));
 });
 
-// 🎯 ENDPOINT CONSULTA DE PRECIOS Y SERVICIOS
 app.post("/api/cotizar", async (req, res) => {
     try {
         const { consulta, tipoServicio } = req.body;
         const textoNorm = normalizar(consulta);
         const esIphone = textoNorm.includes("iphone") || textoNorm.includes("apple");
 
-        if (tipoServicio === "pin_carga" || textoNorm.includes("pin") || textoNorm.includes("carga")) {
+        // Pin de Carga
+        if (tipoServicio === "pin_carga" || textoNorm.includes("pin")) {
             const precio = esIphone ? 50000 : 30000;
             return res.json({
                 tipo: "servicio_fijo",
-                servicio: "Cambio de Pin de Carga",
-                equipo: esIphone ? "iPhone" : "Android",
+                servicio: `Cambio de Pin de Carga (${esIphone ? "iPhone" : "Android"})`,
                 precioFinal: precio
             });
         }
 
+        // Servicios Fijos (FRP, Windows, Office, etc.)
         if (SERVICIOS_FIJOS[tipoServicio]) {
             return res.json({
                 tipo: "servicio_fijo",
@@ -134,8 +136,9 @@ app.post("/api/cotizar", async (req, res) => {
             });
         }
 
+        // Búsqueda de Módulos / Pantallas
         const inventario = await cargarDatosSheets();
-        const palabrasClave = textoNorm.split(" ").filter(p => p.length > 1);
+        const palabrasClave = textoNorm.split(" ").filter(p => p.length > 0);
 
         const coincidencias = inventario.filter(item => {
             return palabrasClave.every(palabra => item.descripcionNorm.includes(palabra));
@@ -144,11 +147,11 @@ app.post("/api/cotizar", async (req, res) => {
         if (coincidencias.length === 0) {
             return res.json({
                 encontrado: false,
-                mensaje: "No se encontró el repuesto en el catálogo. Un técnico cotizará manualmente."
+                mensaje: "No se encontró el repuesto en el catálogo automático."
             });
         }
 
-        const resultados = coincidencias.slice(0, 5).map(item => {
+        const resultados = coincidencias.slice(0, 6).map(item => {
             const precioCliente = calcularPrecio(item.precioBase, esIphone);
             return {
                 codigo: item.codigo,
@@ -170,7 +173,6 @@ app.post("/api/cotizar", async (req, res) => {
     }
 });
 
-// 🩺 VERIFICAR ESTADO DEL SERVIDOR
 app.get("/health", async (req, res) => {
     const datos = await cargarDatosSheets();
     res.json({ status: "OK", totalRepuestos: datos.length, ultimoUpdate: new Date(lastFetch) });
@@ -178,5 +180,5 @@ app.get("/health", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor de Taller corriendo en puerto ${PORT}`);
+    console.log(`🚀 Servidor de Taller listo en puerto ${PORT}`);
 });
