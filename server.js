@@ -8,10 +8,10 @@ import { fileURLToPath } from "url";
 const app = express();
 app.use(express.json());
 
-// 📁 CONFIGURACIÓN PARA SERVIR LA PÁGINA WEB (HTML)
+// 📁 SERVIR ARCHIVOS ESTÁTICOS DESDE LA RAÍZ
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(__dirname));
 
 // 💳 COSTOS FLETES Y MANO DE OBRA
 const COSTO_ENVIO = 12000;
@@ -104,9 +104,9 @@ async function cargarDatosSheets() {
     return inventarioGlobal;
 }
 
-// 🎯 ROUTE PRINCIPAL (SERVIR EL INDEX.HTML)
+// 🎯 RUTA PRINCIPAL (ENTREGA INDEX.HTML DESDE LA RAÍZ)
 app.get("/", (req, res) => {
-    res.sendFile(path.join(__dirname, "public", "index.html"));
+    res.sendFile(path.join(__dirname, "index.html"));
 });
 
 // 🎯 ENDPOINT CONSULTA DE PRECIOS Y SERVICIOS
