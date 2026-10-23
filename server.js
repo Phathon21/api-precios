@@ -2,37 +2,44 @@ import express from "express";
 import fetch from "node-fetch";
 import csv from "csv-parser";
 import { Readable } from "stream";
-import fs from "fs";
-import path from "path";
 
 const app = express();
 app.use(express.json());
 
-// 📁 CONFIGURACIÓN DE FUENTE DE DATOS
-const CSV_LOCAL_PATH = path.join(process.cwd(), "repuestos_catamarca.csv");
-const SHEET_ID = "1VoARNjyEyEjI_MRtdtfsj-7ztHshQYcOXYQhPNS2S14";
-const GID = "942358472";
-const SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}`;
+// 💳 COSTOS FLETES Y MANO DE OBRA
+const COSTO_ENVIO = 12000;
+const MO_ANDROID = 20000;
+const MO_IPHONE = 50000;
 
-// 🔄 CACHE
+// 🛠️ SERVICIOS CON PRECIO FIJO
+const SERVICIOS_FIJOS = {
+    frp: { nombre: "Eliminación Cuenta Google (FRP)", precio: 35000 },
+    virus: { nombre: "Eliminación de Virus / Limpieza", precio: 8000 },
+    software_celular: { nombre: "Reinstalación / Cambio de Software", precio: 25000 },
+    windows: { nombre: "Formateo e Instalación de Windows", precio: 25000 },
+    office: { nombre: "Instalación Paquete Office", precio: 15000 }
+};
+
+// 📁 CONFIGURACIÓN DE GOOGLE SHEETS DE UNV (Agregá los GIDs de cada pestaña)
+const SHEET_ID = "17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC"; // Tu Hoja de UNV
+const GIDS_PROVEEDOR = [
+    { nombre: "MODULOS", gid: "1868161265" }, // GID Pestaña Módulos
+    { nombre: "PLACAS Y LENTES", gid: "785555649" } // GID Pestaña Placas
+];
+
+// 🔄 CACHÉ EN MEMORIA (10 MINUTOS TTL)
 let cachedData = null;
 let lastFetch = 0;
-const CACHE_TTL = 5 * 60 * 1000;
+const CACHE_TTL = 10 * 60 * 1000;
 
-// 💰 LÓGICA DE PRECIOS - SIEMPRE DEVUELVE NÚMERO VÁLIDO
-function calcularPrecio(base, marca, parte) {
-    base = Number(String(base).replace(/[^0-9]/g, ""));
-    if (!base || base <= 0) return 0; // ← Garantiza número válido, nunca null/NaN
+// 💰 FÓRMULA DE CÁLCULO DE PRECIOS
+function calcularPrecio(costoBase, esIphone = false) {
+    const base = Number(String(costoBase).replace(/[^0-9]/g, ""));
+    if (!base || base <= 0) return 0;
 
-    const esIphone = (marca || "").toLowerCase().includes("apple") || (marca || "").toLowerCase().includes("iphone");
-    const esPantalla = (parte || "").toLowerCase().includes("modulo") || (parte || "").toLowerCase().includes("pantall");
-    
-    const margenBase = esIphone ? 10000 : 8000;
-    const gananciaFija = esPantalla 
-        ? (esIphone ? 50000 : 20000) 
-        : (esIphone ? 25000 : 12000);
-    
-    return Math.round((base + margenBase) * 2 + gananciaFija);
+    const manoDeObra = esIphone ? MO_IPHONE : MO_ANDROID;
+    // Fórmula: ((Base + Envío) * 2) + Mano de Obra
+    return Math.round(((base + COSTO_ENVIO) * 2) + manoDeObra);
 }
 
 // 🧼 NORMALIZAR TEXTO
@@ -44,235 +51,126 @@ function normalizar(txt) {
         .replace(/\s+/g, " ");
 }
 
-// 🔍 DETECTAR TIPO DE REPUESTO
-function detectarTipoRepuesto(texto) {
-    const t = normalizar(texto);
-    const tieneBateria = /\bbater|pila|cambiar bateria|cambio bateria/.test(t);
-    const tienePantalla = /\bpantall|modulo|display|lcd|cambiar pantalla|cambio pantalla/.test(t);
-    
-    if (tieneBateria && tienePantalla) return "ambos";
-    if (tieneBateria) return "bateria";
-    if (tienePantalla) return "pantalla";
-    return null;
-}
-
-// 🔍 EXTRAER MODELO + MARCA
-function parsearConsulta(mensaje) {
-    const limpio = mensaje.toLowerCase();
-    const tipoRepuesto = detectarTipoRepuesto(mensaje);
-    
-    // iPhone
-    if (limpio.includes("iphone") || limpio.includes("iph")) {
-        const num = limpio.match(/(?:iphone\s*)?(\d+[a-z]?)/i);
-        return { modelo: num ? "iphone" + num[1].toLowerCase() : null, tipoRepuesto, marca: "Apple" };
-    }
-    // Samsung
-    const samsungMatch = limpio.match(/\b([asjmn]\d{1,3}[a-z]?(?:\s*(?:pro|plus|fe|ultra|core|s))?)/i);
-    if (samsungMatch) {
-        return { modelo: samsungMatch[1].toLowerCase().replace(/\s+/g, ""), tipoRepuesto, marca: "Samsung" };
-    }
-    // Motorola
-    const motoMatch = limpio.match(/\b(?:moto\s*)?([egx]\d{1,3}[a-z]?|edge\d*|razr)/i);
-    if (motoMatch) {
-        return { modelo: motoMatch[1].toLowerCase().replace(/\s+/g, ""), tipoRepuesto, marca: "Motorola" };
-    }
-    // Xiaomi
-    const xiaomiMatch = limpio.match(/\b(?:redmi\s*|poco\s*|mi\s*)?(note\s*\d+[a-z]?|\d{1,3}[a-z]?)/i);
-    if (xiaomiMatch) {
-        let modelo = xiaomiMatch[0].toLowerCase().replace(/\s+/g, "").replace(/^(redmi|poco|mi)/, "");
-        return { modelo, tipoRepuesto, marca: "Xiaomi" };
-    }
-    // Fallback
-    const fallback = limpio.match(/\b([a-z]{1,3}\d{1,3}[a-z]?)\b/i);
-    return { modelo: fallback ? fallback[1].toLowerCase() : null, tipoRepuesto, marca: null };
-}
-
-// 📥 CARGAR DATOS
-async function cargarDatos() {
+// 📥 DESCARGAR DATOS FRESCOS DE GOOGLE SHEETS
+async function cargarDatosSheets() {
     const ahora = Date.now();
-    if (cachedData && (ahora - lastFetch) < CACHE_TTL) return cachedData;
-
-    let csvText = "";
-    if (fs.existsSync(CSV_LOCAL_PATH)) {
-        csvText = fs.readFileSync(CSV_LOCAL_PATH, "utf-8");
-    } else {
-        const res = await fetch(SHEET_CSV_URL);
-        if (!res.ok) throw new Error("No se pudo cargar la hoja de cálculo");
-        csvText = await res.text();
+    if (cachedData && (ahora - lastFetch) < CACHE_TTL) {
+        return cachedData;
     }
 
-    const datos = [];
-    await new Promise((resolve, reject) => {
-        Readable.from(csvText)
-            .pipe(csv())
-            .on("data", row => {
-                if (row.Modelo && row.PrecioBase) {
-                    datos.push({
-                        ...row,
-                        PrecioBase: String(row.PrecioBase).replace(/[^0-9]/g, ""),
-                        Modelo: normalizar(row.Modelo),
-                        Marca: normalizar(row.Marca),
-                        Parte: normalizar(row.Parte),
-                        Calidad: normalizar(row.Calidad),
-                        Variante: normalizar(row.Variante)
-                    });
-                }
-            })
-            .on("end", resolve)
-            .on("error", reject);
-    });
+    let inventarioGlobal = [];
 
-    cachedData = datos;
+    for (const pestaña of GIDS_PROVEEDOR) {
+        const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${pestaña.gid}`;
+        try {
+            const res = await fetch(url);
+            if (!res.ok) continue;
+            const csvText = await res.text();
+
+            await new Promise((resolve) => {
+                Readable.from(csvText)
+                    .pipe(csv())
+                    .on("data", row => {
+                        // Mapeo adaptado a las columnas (COD, DESCRIPCION/PLACA, PRECIO)
+                        const descripcion = row["MODULOS"] || row["PLACAS DE CARGAS"] || row["DESCRIPCION"] || row["C"] || "";
+                        const precioStr = row["PRECIO"] || row["D"] || "0";
+
+                        if (descripcion && precioStr) {
+                            inventarioGlobal.push({
+                                codigo: row["COD"] || row["B"] || "",
+                                descripcion: descripcion,
+                                descripcionNorm: normalizar(descripcion),
+                                precioBase: Number(String(precioStr).replace(/[^0-9]/g, "")),
+                                categoria: pestaña.nombre
+                            });
+                        }
+                    })
+                    .on("end", resolve)
+                    .on("error", () => resolve());
+            });
+        } catch (err) {
+            console.error(`Error cargando pestaña ${pestaña.nombre}:`, err.message);
+        }
+    }
+
+    cachedData = inventarioGlobal;
     lastFetch = ahora;
-    console.log(`📦 Datos cargados: ${datos.length} registros`);
-    return datos;
+    console.log(`✅ Base de datos actualizada: ${inventarioGlobal.length} repuestos cargados.`);
+    return inventarioGlobal;
 }
 
-// 🎯 FILTRAR RESULTADOS
-function buscarRepuestos(datos, { modelo, tipoRepuesto, marca }) {
-    if (!modelo) return [];
-    const modeloNorm = normalizar(modelo);
-    const marcaNorm = marca ? normalizar(marca) : null;
-    
-    return datos.filter(item => {
-        const matchModelo = item.Modelo === modeloNorm || item.Modelo.includes(modeloNorm);
-        
-        let matchParte = false;
-        if (tipoRepuesto === "ambos") {
-            matchParte = item.Parte?.includes("bater") || item.Parte?.includes("modulo") || item.Parte?.includes("pantall");
-        } else if (tipoRepuesto === "bateria") {
-            matchParte = item.Parte?.includes("bater");
-        } else {
-            matchParte = item.Parte?.includes("modulo") || item.Parte?.includes("pantall");
-        }
-        
-        const matchMarca = !marcaNorm || item.Marca?.includes(marcaNorm);
-        return matchModelo && matchParte && matchMarca;
-    });
-}
-
-// 🚀 ENDPOINT PRINCIPAL
-app.post("/precio", async (req, res) => {
+// 🎯 ENDPOINT CONSULTA DE PRECIOS Y SERVICIOS
+app.post("/api/cotizar", async (req, res) => {
     try {
-        const mensaje = req.body.message || req.body.texto || "";
-        const consulta = parsearConsulta(mensaje);
-        
-        if (!consulta.modelo) {
-            return res.json({ 
-                respuesta: `👋 ¡Hola! Soy el asistente técnico de *EAInformatica*.\n\nContame: ¿Qué modelo de equipo tenés?`,
-                tipo: "saludo"
-            });
-        }
+        const { consulta, tipoServicio } = req.body;
+        const textoNorm = normalizar(consulta);
+        const esIphone = textoNorm.includes("iphone") || textoNorm.includes("apple");
 
-        const datos = await cargarDatos();
-        const resultados = buscarRepuestos(datos, consulta);
-
-        if (resultados.length === 0) {
-            return res.json({ 
-                respuesta: `❌ No encontré información para *${consulta.modelo.toUpperCase()}*.\n\n📩 Un *técnico* va a revisar manualmente y te contesta en un toque. 😉`,
-                tipo: "no_encontrado"
-            });
-        }
-
-        // 🔋🖥️ CASO: AMBOS REPUESTOS
-        if (consulta.tipoRepuesto === "ambos") {
-            const pantallas = resultados.filter(r => r.Parte?.includes("modulo") || r.Parte?.includes("pantall"));
-            const baterias = resultados.filter(r => r.Parte?.includes("bater"));
-            let respuesta = `🔋🖥️ Presupuesto para *${resultados[0].NombreMostrar || consulta.modelo.toUpperCase()}*:\n\n`;
-            
-            let precioBateria = 0;
-            if (baterias.length > 0) {
-                precioBateria = calcularPrecio(baterias[0].PrecioBase, baterias[0].Marca, baterias[0].Parte);
-                respuesta += `🔹 Batería (Original) → *$${precioBateria.toLocaleString('es-AR')}*\n`;
-            }
-            
-            const preciosPantalla = {};
-            if (pantallas.length > 0) {
-                respuesta += `\n🔹 Pantalla:\n`;
-                pantallas.forEach(p => {
-                    const calidad = (p.Calidad || "estandar").toLowerCase().trim();
-                    if (!preciosPantalla[calidad]) {
-                        const precio = calcularPrecio(p.PrecioBase, p.Marca, p.Parte);
-                        preciosPantalla[calidad] = precio;
-                        respuesta += `   • ${p.Calidad} → *$${precio.toLocaleString('es-AR')}*\n`;
-                    }
-                });
-            }
-            
-            respuesta += `\n✅ *Precios finales con colocación incluida.*\n📍 ¿Qué repuesto querés encargar?`;
-            
+        // 1. PIN DE CARGA (Precio Fijo según SO)
+        if (tipoServicio === "pin_carga" || textoNorm.includes("pin") || textoNorm.includes("carga")) {
+            const precio = esIphone ? 50000 : 30000;
             return res.json({
-                respuesta,
-                tipo: "ambos_repuestos",
-                modelo: consulta.modelo,
-                precios: { bateria: precioBateria, pantalla: preciosPantalla }
+                tipo: "servicio_fijo",
+                servicio: "Cambio de Pin de Carga",
+                equipo: esIphone ? "iPhone" : "Android",
+                precioFinal: precio
             });
         }
 
-        // 🔋 CASO: SOLO BATERÍA
-        if (consulta.tipoRepuesto === "bateria") {
-            const item = resultados[0];
-            const precio = calcularPrecio(item.PrecioBase, item.Marca, item.Parte);
-            const nombreReal = item.NombreMostrar || `${item.Marca} ${consulta.modelo}`;
-            
+        // 2. OTROS SERVICIOS FIJOS
+        if (SERVICIOS_FIJOS[tipoServicio]) {
             return res.json({
-                respuesta: `🔋 *Batería para ${nombreReal}*\n\n💰 Precio: *$${precio.toLocaleString('es-AR')}* (Original con colocación)\n\n⚠️ El precio puede variar según stock. ¿Confirmás que querés este repuesto?\n\n1. ✅ Sí, quiero reservar\n2. ❌ No, era otra consulta`,
-                tipo: "bateria_confirmacion",
-                modelo: consulta.modelo,
-                precio: precio
+                tipo: "servicio_fijo",
+                servicio: SERVICIOS_FIJOS[tipoServicio].nombre,
+                precioFinal: SERVICIOS_FIJOS[tipoServicio].precio
             });
         }
 
-        // 🖥️ CASO: SOLO PANTALLA
-        const opciones = {};
-        resultados.forEach(item => {
-            const key = item.Calidad || "Estandar";
-            if (!opciones[key]) opciones[key] = [];
-            opciones[key].push(item);
+        // 3. BUSCAR EN PROVEEDOR (REPUESTOS)
+        const inventario = await cargarDatosSheets();
+        const palabrasClave = textoNorm.split(" ").filter(p => p.length > 1);
+
+        const coincidencias = inventario.filter(item => {
+            return palabrasClave.every(palabra => item.descripcionNorm.includes(palabra));
         });
-        
-        const nombreReal = resultados[0].NombreMostrar || `${resultados[0].Marca} ${consulta.modelo}`;
-        let respuesta = `📱 *Pantalla para ${nombreReal}*\n\n¿Qué calidad buscás?\n\n`;
-        
-        let idx = 1;
-        const opcionesArray = [];
-        for (const [calidad, items] of Object.entries(opciones)) {
-            const precio = calcularPrecio(items[0].PrecioBase, items[0].Marca, items[0].Parte);
-            respuesta += `${idx}. *${calidad}* → *$${precio.toLocaleString('es-AR')}*\n`;
-            opcionesArray.push({ nombre: calidad, precio, numero: idx });
-            idx++;
+
+        if (coincidencias.length === 0) {
+            return res.json({
+                encontrado: false,
+                mensaje: "No se encontró el repuesto en el catálogo. Un técnico cotizará manualmente."
+            });
         }
-        
-        respuesta += `\n*(Escribí el nombre o el número)*`;
-        
+
+        // Dar formato a las opciones encontradas con la fórmula
+        const resultados = coincidencias.slice(0, 5).map(item => {
+            const precioCliente = calcularPrecio(item.precioBase, esIphone);
+            return {
+                codigo: item.codigo,
+                repuesto: item.descripcion,
+                costoBase: item.precioBase,
+                precioCliente: precioCliente,
+                categoria: item.categoria
+            };
+        });
+
         return res.json({
-            respuesta,
-            tipo: "pantalla_calidad",
-            modelo: consulta.modelo,
-            opciones: opcionesArray
+            encontrado: true,
+            resultados: resultados
         });
 
     } catch (error) {
-        console.error("❌ Error en /precio:", error.message);
-        return res.json({ 
-            respuesta: "⚠️ Tuvimos un inconveniente técnico.\n\n📩 Un humano va a revisar tu consulta y te responde en breve. ¡Gracias por la paciencia! 😉",
-            tipo: "error"
-        });
+        console.error("Error en cotización:", error);
+        res.status(500).json({ error: "Error interno del servidor" });
     }
 });
 
-// 🩺 HEALTH CHECK
-app.get("/health", (req, res) => {
-    res.json({ 
-        status: "ok", 
-        cache: !!cachedData, 
-        registros: cachedData?.length || 0,
-        ttl: CACHE_TTL 
-    });
+// 🩺 VERIFICAR ESTADO DEL SERVIDOR
+app.get("/health", async (req, res) => {
+    const datos = await cargarDatosSheets();
+    res.json({ status: "OK", totalRepuestos: datos.length, ultimoUpdate: new Date(lastFetch) });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 API de Precios EAInformatica lista en puerto ${PORT}`);
-    console.log(`📁 CSV local: ${fs.existsSync(CSV_LOCAL_PATH) ? "✅" : "❌"} ${CSV_LOCAL_PATH}`);
+    console.log(`🚀 Servidor de Taller corriendo en puerto ${PORT}`);
 });
