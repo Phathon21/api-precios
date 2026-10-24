@@ -4,6 +4,21 @@ import csv from "csv-parser";
 import { Readable } from "stream";
 import path from "path";
 import { fileURLToPath } from "url";
+import { randomUUID } from "crypto";
+import {
+    detectarCalidadUniversal,
+    detectarMarcoUniversal,
+    detectarRedUniversal,
+    detectarMarcaDesdeConsulta,
+    quitarRedDeConsulta,
+    redExplicita,
+    combinarRed,
+    construirNombreVariante,
+    claveVariante,
+    redCoincide,
+    esMarcaIphone,
+    nombreModeloVisible
+} from "./catalogo.js";
 
 const app = express();
 app.use(express.json());
@@ -31,8 +46,9 @@ const GIDS_PROVEEDOR = [
     { nombre: "MODULOS", gid: "1766941416" }
 ];
 
-const PROCEL_EMAIL = process.env.PROCEL_EMAIL || "warframe4k.ea@gmail.com";
-const PROCEL_PASSWORD = process.env.PROCEL_PASSWORD || "Passwer,21";
+// Nunca guardes credenciales de Procel en el repositorio.
+const PROCEL_EMAIL = process.env.PROCEL_EMAIL || "";
+const PROCEL_PASSWORD = process.env.PROCEL_PASSWORD || "";
 const PROCEL_BASE = "https://www.procelcatamarca.com.ar";
 
 const MI_SHEET_ID = "1cjS2vOdk9pTpAE4vyAKdTATSrSMklMOp8YFLLQzk8DY";
@@ -45,6 +61,67 @@ let procelCookie = null;
 let procelToken = null;
 let procelLoginAt = 0;
 const PROCEL_SESSION_TTL = 50 * 60 * 1000;
+const COTIZACION_TTL = 24 * 60 * 60 * 1000;
+const cotizacionesInternas = new Map();
+const STOCK_API_URL = process.env.STOCK_API_URL || "";
+const STOCK_API_TOKEN = process.env.STOCK_API_TOKEN || "";
+
+function limpiarCotizacionesInternas() {
+    const limite = Date.now() - COTIZACION_TTL;
+    for (const [id, cotizacion] of cotizacionesInternas) {
+        if (cotizacion.creadaEn < limite) cotizacionesInternas.delete(id);
+    }
+}
+
+async function buscarStockPropio(consulta) {
+    if (!STOCK_API_URL || !STOCK_API_TOKEN) return [];
+    try {
+        const respuesta = await fetch(STOCK_API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({
+                token: STOCK_API_TOKEN,
+                accion: "buscar",
+                consulta
+            })
+        });
+        if (!respuesta.ok) return [];
+        const datos = await respuesta.json();
+        return Array.isArray(datos.items) ? datos.items : [];
+    } catch (error) {
+        console.error("Error consultando stock propio:", error.message);
+        return [];
+    }
+}
+
+function stockPropioCoincide(item, modelo, grupo) {
+    const modeloStock = normalizar(item.modelo || "");
+    const modeloBuscado = normalizar(modelo || "");
+    if (!modeloStock || !(modeloStock.includes(modeloBuscado) || modeloBuscado.includes(modeloStock))) return false;
+
+    const calidadStock = normalizar(item.calidad || "");
+    const calidadValida = grupo.calidad === "PREMIUM"
+        ? /premium|oled|amoled|orig|original|mecanico/.test(calidadStock)
+        : /incell/.test(calidadStock);
+    if (!calidadValida) return false;
+
+    const marcoStock = normalizar(item.marco || "");
+    const marcoValido = grupo.marco === "CON_MARCO"
+        ? /con|c\/m|marco/.test(marcoStock) && !/sin/.test(marcoStock)
+        : /sin|s\/m/.test(marcoStock);
+    if (!marcoValido) return false;
+
+    const redStock = normalizar(item.red || "");
+    if (grupo.red === "4G" && redStock && !redStock.includes("4g")) return false;
+    if (grupo.red === "5G" && redStock && !redStock.includes("5g")) return false;
+    return true;
+}
+
+function cantidadStockPropio(items, modelo, grupo) {
+    return items
+        .filter(item => stockPropioCoincide(item, modelo, grupo))
+        .reduce((total, item) => total + (Number(item.cantidad) || 0), 0);
+}
 
 function calcularPrecio(costoBase, esIphone = false) {
     const base = Number(String(costoBase).replace(/[^0-9]/g, ""));
@@ -131,6 +208,11 @@ function claveDedup(item) {
 }
 
 async function procelLogin() {
+    if (!PROCEL_EMAIL || !PROCEL_PASSWORD) {
+        console.warn("Procel no configurado: faltan PROCEL_EMAIL y PROCEL_PASSWORD.");
+        return false;
+    }
+
     const ahora = Date.now();
     if (procelCookie && procelToken && (ahora - procelLoginAt) < PROCEL_SESSION_TTL) {
         return true;
@@ -293,20 +375,18 @@ app.get("/", (req, res) => {
 app.post("/api/cotizar", async (req, res) => {
     try {
         const { consulta, tipoServicio } = req.body;
-        const textoNorm = normalizar(consulta || "");
-        const esIphone =
-            textoNorm.includes("iphone") ||
-            textoNorm.includes("iph") ||
-            textoNorm.includes("apple");
+        const consultaOriginal = String(consulta || "").trim();
+        const textoNorm = normalizar(consultaOriginal);
+        const esIphone = esMarcaIphone(consultaOriginal);
+        const redConsulta = redExplicita(consultaOriginal);
+        const consultaModelo = quitarRedDeConsulta(consultaOriginal);
+        const modeloVisible = nombreModeloVisible(consultaModelo || consultaOriginal);
 
         if (tipoServicio === "pin") {
             const precio = esIphone ? 50000 : 30000;
-            const modeloFormateado = consulta
-                ? consulta.toUpperCase()
-                : esIphone ? "iPhone" : "Android";
             return res.json({
                 tipo: "servicio_fijo",
-                servicio: `Cambio de Pin de Carga (${modeloFormateado})`,
+                servicio: `Cambio de Pin de Carga (${modeloVisible})`,
                 precioFinal: precio
             });
         }
@@ -322,89 +402,214 @@ app.post("/api/cotizar", async (req, res) => {
         if (tipoServicio === "bateria") {
             return res.json({
                 encontrado: false,
-                mensaje: "El proveedor ya no publica baterías en el catálogo automático. Pedí cotización manual o usá tu stock propio."
+                mensaje: "El proveedor todavía no publica baterías en el catálogo automático. Te contactaremos para una cotización manual."
             });
         }
 
-        const [inventarioUnv, itemsProcel] = await Promise.all([
+        if (!consultaModelo) {
+            return res.json({ encontrado: false, mensaje: "Ingresá la marca y el modelo del celular." });
+        }
+
+        const [inventarioUnv, itemsProcel, stockPropio] = await Promise.all([
             cargarDatosUnv(),
-            consulta ? buscarProcel(consulta, esIphone) : Promise.resolve([])
+            buscarProcel(consultaModelo, esIphone),
+            buscarStockPropio(consultaModelo)
         ]);
 
-        const palabrasBuscadas = textoNorm.split(" ").filter(p => p.length > 0);
-        if (palabrasBuscadas.length === 0) {
-            return res.json({ encontrado: false });
-        }
+        const palabrasBuscadas = normalizar(consultaModelo).split(" ").filter(Boolean);
+        const coincidenciasUnv = inventarioUnv
+            .filter(item => {
+                const desc = item.descripcionNorm;
+                if (
+                    desc.includes("placa de carga") ||
+                    desc.includes("pin de carga") ||
+                    desc.includes("lente") ||
+                    desc.includes("bateria") ||
+                    desc.includes("flex de power")
+                ) return false;
+                return descripcionCoincide(desc, palabrasBuscadas);
+            })
+            .map(item => ({ ...item, origen: "UNV" }));
 
-        let coincidenciasUnv = inventarioUnv.filter(item => {
-            const desc = item.descripcionNorm;
-            if (
-                desc.includes("placa de carga") ||
-                desc.includes("pin de carga") ||
-                desc.includes("lente") ||
-                desc.includes("bateria") ||
-                desc.includes("flex de power")
-            ) {
-                return false;
-            }
-            return descripcionCoincide(desc, palabrasBuscadas);
-        }).map(item => ({
+        let coincidencias = [...coincidenciasUnv, ...itemsProcel].map(item => ({
             ...item,
-            calidad: detectarCalidad(item.descripcionNorm, esIphone)
+            calidadUniversal: detectarCalidadUniversal(item.descripcionNorm || item.descripcion, esIphone),
+            marcoUniversal: detectarMarcoUniversal(item.descripcionNorm || item.descripcion),
+            redUniversal: detectarRedUniversal(item.descripcionNorm || item.descripcion)
         }));
 
-        let coincidencias = [...coincidenciasUnv, ...itemsProcel];
-
         if (coincidencias.length === 0) {
-            return res.json({ encontrado: false });
+            return res.json({
+                encontrado: false,
+                mensaje: "No encontramos una oferta automática para ese modelo. Podemos cotizarlo manualmente."
+            });
         }
 
-        const mapa = new Map();
-        for (const item of coincidencias) {
-            const key = claveDedup(item);
-            const actual = mapa.get(key);
-            if (!actual || item.precioBase > actual.precioBase) {
-                mapa.set(key, item);
+        // Si el usuario no indicó 4G/5G y el catálogo tiene ambas variantes,
+        // se pregunta antes de mostrar un precio potencialmente incompatible.
+        if (!redConsulta) {
+            const redes = new Set();
+            coincidencias.forEach(item => {
+                if (item.redUniversal === "4G" || item.redUniversal === "4G_5G") redes.add("4G");
+                if (item.redUniversal === "5G" || item.redUniversal === "4G_5G") redes.add("5G");
+            });
+            if (redes.size > 1) {
+                return res.json({
+                    encontrado: false,
+                    requiereRed: true,
+                    modelo: modeloVisible,
+                    opcionesRed: ["4G", "5G"],
+                    mensaje: "Este modelo existe en versiones 4G y 5G. Elegí la versión de tu equipo para evitar pedir un módulo incompatible."
+                });
             }
         }
-        coincidencias = Array.from(mapa.values());
 
-        const originales = [];
-        const incell = [];
+        coincidencias = coincidencias.filter(item => redCoincide(redConsulta, item.redUniversal));
+        const grupos = new Map();
 
-        coincidencias.forEach(item => {
-            const precioCliente = calcularPrecio(item.precioBase, esIphone);
-            if (precioCliente <= 0) return;
+        for (const item of coincidencias) {
+            if (!["PREMIUM", "INCELL"].includes(item.calidadUniversal)) continue;
+            const redFinal = combinarRed(redConsulta, item.redUniversal);
+            const key = claveVariante(modeloVisible, item.calidadUniversal, item.marcoUniversal, redFinal);
+            if (!grupos.has(key)) {
+                grupos.set(key, {
+                    calidad: item.calidadUniversal,
+                    marco: item.marcoUniversal,
+                    red: redFinal,
+                    ofertas: []
+                });
+            }
 
-            const objeto = {
+            const grupo = grupos.get(key);
+            const ofertaExistente = grupo.ofertas.find(oferta =>
+                oferta.proveedor === item.origen && oferta.codigo === item.codigo
+            );
+            const oferta = {
+                proveedor: item.origen,
                 codigo: item.codigo,
-                repuesto: `[${item.origen}] ${item.descripcion}`,
+                descripcionOriginal: item.descripcion,
+                precioBase: Number(item.precioBase) || 0,
+                stock: Number(item.stock) || 0
+            };
+            if (!ofertaExistente) grupo.ofertas.push(oferta);
+            else if (oferta.precioBase < ofertaExistente.precioBase || oferta.stock > ofertaExistente.stock) {
+                Object.assign(ofertaExistente, oferta);
+            }
+        }
+
+        limpiarCotizacionesInternas();
+        const premium = [];
+        const incell = [];
+        for (const grupo of grupos.values()) {
+            const ofertasValidas = grupo.ofertas
+                .filter(oferta => oferta.precioBase > 0 && oferta.stock > 0)
+                .sort((a, b) => a.precioBase - b.precioBase);
+            if (ofertasValidas.length === 0) continue;
+
+            const elegida = ofertasValidas[0];
+            const precioCliente = calcularPrecio(elegida.precioBase, esIphone);
+            if (precioCliente <= 0) continue;
+
+            const nombre = construirNombreVariante(modeloVisible, grupo.calidad, grupo.marco, grupo.red);
+            const stockPropioCantidad = cantidadStockPropio(stockPropio, modeloVisible, grupo);
+            const cotizacionId = randomUUID();
+            cotizacionesInternas.set(cotizacionId, {
+                creadaEn: Date.now(),
+                modelo: modeloVisible,
+                nombre,
                 precioCliente,
-                precioBase: item.precioBase,
-                stock: item.stock,
-                origen: item.origen,
-                calidad: item.calidad
+                calidad: grupo.calidad,
+                marco: grupo.marco,
+                red: grupo.red,
+                stockPropioCantidad,
+                ofertas: ofertasValidas,
+                proveedorRecomendado: elegida.proveedor
+            });
+            const objeto = {
+                repuesto: nombre,
+                nombre,
+                cotizacionId,
+                precioCliente,
+                calidad: grupo.calidad,
+                marco: grupo.marco,
+                red: grupo.red,
+                garantiaDias: grupo.calidad === "PREMIUM" ? 60 : 0,
+                proveedoresDisponibles: ofertasValidas.length
             };
 
-            if (item.calidad === "ORIGINAL") {
-                originales.push(objeto);
-            } else {
-                incell.push(objeto);
-            }
-        });
+            // La comparación queda disponible en el backend para el futuro pedido
+            // interno; no se envían precios de proveedores al navegador del cliente.
+            objeto._detalleInterno = {
+                ofertas: ofertasValidas,
+                proveedorRecomendado: elegida.proveedor
+            };
 
-        originales.sort((a, b) => a.precioCliente - b.precioCliente);
+            if (grupo.calidad === "PREMIUM") premium.push(objeto);
+            else incell.push(objeto);
+        }
+
+        premium.sort((a, b) => a.precioCliente - b.precioCliente);
         incell.sort((a, b) => a.precioCliente - b.precioCliente);
 
+        if (premium.length === 0 && incell.length === 0) {
+            return res.json({
+                encontrado: false,
+                mensaje: "Encontramos referencias, pero ninguna tiene calidad o disponibilidad confirmada. Podemos cotizarlo manualmente."
+            });
+        }
+
+        // Se elimina el detalle interno antes de responder al cliente.
+        const limpiarRespuesta = items => items.map(({ _detalleInterno, ...publico }) => publico);
         return res.json({
             encontrado: true,
             esIphone,
-            originales: originales.slice(0, 12),
-            incell: esIphone ? [] : incell.slice(0, 12)
+            modelo: modeloVisible,
+            premium: limpiarRespuesta(premium).slice(0, 12),
+            originales: limpiarRespuesta(premium).slice(0, 12),
+            incell: esIphone ? [] : limpiarRespuesta(incell).slice(0, 12)
         });
     } catch (error) {
         console.error("Error en cotización:", error);
         res.status(500).json({ error: "Error interno del servidor" });
+    }
+});
+
+app.post("/api/pedidos", (req, res) => {
+    try {
+        limpiarCotizacionesInternas();
+        const { nombre, pago, items } = req.body || {};
+        if (!nombre || !Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ error: "Faltan nombre o reparaciones." });
+        }
+
+        const pedidoId = randomUUID();
+        const detalleInterno = items.map(item => {
+            const cotizacion = item.cotizacionId ? cotizacionesInternas.get(item.cotizacionId) : null;
+            return {
+                nombre: cotizacion?.nombre || item.repuesto || "Servicio manual",
+                precioCliente: cotizacion?.precioCliente || Number(item.precio) || 0,
+                calidad: cotizacion?.calidad || item.calidad || "",
+                marco: cotizacion?.marco || item.marco || "",
+                red: cotizacion?.red || item.red || "",
+                stockPropioCantidad: cotizacion?.stockPropioCantidad || 0,
+                ofertas: cotizacion?.ofertas || [],
+                proveedorRecomendado: cotizacion?.proveedorRecomendado || ""
+            };
+        });
+
+        // Por ahora se registra en los logs de Render. En la siguiente etapa,
+        // este mismo objeto se enviará automáticamente al grupo interno.
+        console.log("NUEVO PEDIDO INTERNO", JSON.stringify({
+            pedidoId,
+            nombre,
+            pago: pago || "No informado",
+            items: detalleInterno
+        }));
+
+        return res.json({ ok: true, pedidoId });
+    } catch (error) {
+        console.error("Error registrando pedido:", error);
+        return res.status(500).json({ error: "No se pudo registrar el pedido." });
     }
 });
 
