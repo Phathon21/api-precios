@@ -27,12 +27,9 @@ const SERVICIOS_FIJOS = {
     office: { nombre: "Instalación Paquete Office (PC)", precio: 15000 }
 };
 
-// 📁 GOOGLE SHEETS DE UNV
+// 📁 GOOGLE SHEETS DE UNV (SOLO PESTAÑA MODULOS)
 const SHEET_ID = "17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC"; 
-const GIDS_PROVEEDOR = [
-    { nombre: "MODULOS", gid: "1868161265" },
-    { nombre: "PLACAS Y LENTES", gid: "785555649" }
-];
+const GID_MODULOS = "1868161265"; // Pestaña Módulos
 
 let cachedData = null;
 let lastFetch = 0;
@@ -54,6 +51,16 @@ function normalizar(txt) {
         .replace(/\s+/g, " ");
 }
 
+// 🔍 TRADUCTOR DE MARCAS Y ALIAS
+function obtenerSinonimos(palabra) {
+    const p = normalizar(palabra);
+    if (p === "iphone" || p === "apple") return ["iphone", "iph", "apple"];
+    if (p === "samsung") return ["samsung", "sam", "sm"];
+    if (p === "motorola") return ["motorola", "moto"];
+    if (p === "xiaomi") return ["xiaomi", "redmi", "mi", "poco"];
+    return [p];
+}
+
 async function cargarDatosSheets() {
     const ahora = Date.now();
     if (cachedData && (ahora - lastFetch) < CACHE_TTL) {
@@ -61,12 +68,11 @@ async function cargarDatosSheets() {
     }
 
     let inventarioGlobal = [];
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID_MODULOS}`;
 
-    for (const pestaña of GIDS_PROVEEDOR) {
-        const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${pestaña.gid}`;
-        try {
-            const res = await fetch(url);
-            if (!res.ok) continue;
+    try {
+        const res = await fetch(url);
+        if (res.ok) {
             const csvText = await res.text();
 
             await new Promise((resolve) => {
@@ -74,34 +80,40 @@ async function cargarDatosSheets() {
                     .pipe(csv({ headers: false }))
                     .on("data", row => {
                         const codigo = row[1] || "";
-                        const descripcion = (row[2] || row[1] || "").toString().trim();
-                        const precioStr = row[3] || row[2] || "0";
+                        const descripcion = (row[2] || "").toString().trim();
+                        const precioStr = row[3] || "0";
 
                         const precioLimpio = Number(String(precioStr).replace(/[^0-9]/g, ""));
                         const descUpper = descripcion.toUpperCase();
 
-                        // Descartar solo filas de encabezados o vacías
-                        if (descripcion.length > 2 && precioLimpio > 500 && descUpper !== "PLACAS DE CARGAS" && descUpper !== "PRECIO" && descUpper !== "DESCRIPCION") {
+                        // SOLO REGISTROS CON PRECIO BASE VÁLIDO (> 0)
+                        if (descripcion.length > 3 && precioLimpio > 0 && !descUpper.includes("PRECIO") && !descUpper.includes("MODULOS SM")) {
+                            
+                            // Clasificación de Calidad
+                            const norm = normalizar(descripcion);
+                            const esOriginal = norm.includes("orig") || norm.includes("oled") || norm.includes("amoled");
+                            const calidad = esOriginal ? "ORIGINAL" : "INCELL";
+
                             inventarioGlobal.push({
                                 codigo: codigo,
                                 descripcion: descripcion,
-                                descripcionNorm: normalizar(descripcion),
+                                descripcionNorm: norm,
                                 precioBase: precioLimpio,
-                                categoria: pestaña.nombre
+                                calidad: calidad
                             });
                         }
                     })
                     .on("end", resolve)
                     .on("error", () => resolve());
             });
-        } catch (err) {
-            console.error(`Error cargando pestaña ${pestaña.nombre}:`, err.message);
         }
+    } catch (err) {
+        console.error("Error cargando Google Sheets:", err.message);
     }
 
     cachedData = inventarioGlobal;
     lastFetch = ahora;
-    console.log(`✅ Base de datos cargada: ${inventarioGlobal.length} repuestos.`);
+    console.log(`✅ Catálogo de Módulos actualizado: ${inventarioGlobal.length} repuestos con precio.`);
     return inventarioGlobal;
 }
 
@@ -113,20 +125,20 @@ app.post("/api/cotizar", async (req, res) => {
     try {
         const { consulta, tipoServicio } = req.body;
         const textoNorm = normalizar(consulta || "");
-        const esIphone = textoNorm.includes("iphone") || textoNorm.includes("apple");
+        const esIphone = textoNorm.includes("iphone") || textoNorm.includes("iph") || textoNorm.includes("apple");
 
-        // ⚡ 1. PIN DE CARGA (PRECIO FIJO DIRECTO)
+        // ⚡ 1. PIN DE CARGA (DIRECTO SIN PROVEEDOR)
         if (tipoServicio === "pin") {
             const precio = esIphone ? 50000 : 30000;
             const modeloFormateado = consulta ? consulta.toUpperCase() : (esIphone ? "iPhone" : "Android");
             return res.json({
                 tipo: "servicio_fijo",
-                servicio: `Cambio de Pin de Carga - ${modeloFormateado}`,
+                servicio: `Cambio de Pin de Carga (${modeloFormateado})`,
                 precioFinal: precio
             });
         }
 
-        // ⚡ 2. SERVICIOS FIJOS (FRP, WINDOWS, OFFICE, ETC.)
+        // ⚡ 2. SERVICIOS FIJOS
         if (SERVICIOS_FIJOS[tipoServicio]) {
             return res.json({
                 tipo: "servicio_fijo",
@@ -135,44 +147,44 @@ app.post("/api/cotizar", async (req, res) => {
             });
         }
 
-        // 📱 3. BÚSQUEDA DE MÓDULOS / PANTALLAS
+        // 📱 3. BÚSQUEDA DE MÓDULOS
         const inventario = await cargarDatosSheets();
-        const palabrasClave = textoNorm.split(" ").filter(p => p.length > 0);
+        const palabrasBuscadas = textoNorm.split(" ").filter(p => p.length > 0);
 
         const coincidencias = inventario.filter(item => {
-            if (tipoServicio === "pantalla") {
-                // Solo buscar en categoría MODULOS o repuestos que contengan "modulo"
-                if (item.categoria !== "MODULOS" && !item.descripcionNorm.includes("modulo")) return false;
-                
-                // Descartar expresamente placas de carga completas si se busca pantalla
-                if (item.descripcionNorm.includes("placa de carga")) return false;
-            }
-
-            // Validar que todas las palabras buscadas estén en la descripción
-            return palabrasClave.every(palabra => item.descripcionNorm.includes(palabra));
+            return palabrasBuscadas.every(palabra => {
+                const posiblesSinonimos = obtenerSinonimos(palabra);
+                return posiblesSinonimos.some(sinonimo => item.descripcionNorm.includes(sinonimo));
+            });
         });
 
         if (coincidencias.length === 0) {
-            return res.json({
-                encontrado: false,
-                mensaje: "No se encontró el repuesto en el catálogo automático."
-            });
+            return res.json({ encontrado: false });
         }
 
-        const resultados = coincidencias.slice(0, 8).map(item => {
+        // Separar resultados por calidad (Originales/OLED vs Incell)
+        const originales = [];
+        const incell = [];
+
+        coincidencias.forEach(item => {
             const precioCliente = calcularPrecio(item.precioBase, esIphone);
-            return {
+            const objetoResultado = {
                 codigo: item.codigo,
                 repuesto: item.descripcion,
-                costoBase: item.precioBase,
-                precioCliente: precioCliente,
-                categoria: item.categoria
+                precioCliente: precioCliente
             };
+
+            if (item.calidad === "ORIGINAL") {
+                originales.push(objetoResultado);
+            } else {
+                incell.push(objetoResultado);
+            }
         });
 
         return res.json({
             encontrado: true,
-            resultados: resultados
+            originales: originales.slice(0, 5),
+            incell: incell.slice(0, 5)
         });
 
     } catch (error) {
@@ -188,5 +200,5 @@ app.get("/health", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor de Taller listo en puerto ${PORT}`);
+    console.log(`🚀 Servidor listo en puerto ${PORT}`);
 });
