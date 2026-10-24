@@ -27,13 +27,15 @@ const SERVICIOS_FIJOS = {
     office: { nombre: "Instalación Paquete Office (PC)", precio: 15000 }
 };
 
-// 📁 GOOGLE SHEETS DE UNV (TODAS LAS PESTAÑAS)
+// 📁 GOOGLE SHEETS DEL PROVEEDOR UNV (solo módulos)
 const SHEET_ID = "17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC";
 const GIDS_PROVEEDOR = [
-    { nombre: "MODULOS MECANICO", gid: "0" },
-    { nombre: "MODULOS", gid: "1868161265" },
-    { nombre: "PLACAS Y LENTES", gid: "785555649" }
+    { nombre: "MODULOS MECANICO", gid: "785555649" },
+    { nombre: "MODULOS", gid: "1766941416" }
 ];
+
+// 📁 TU INVENTARIO PROPIO (por ahora vacío, listo para usar después)
+const MI_SHEET_ID = "1cjS2vOdk9pTpAE4vyAKdTATSrSMklMOp8YFLLQzk8DY";
 
 let cachedData = null;
 let lastFetch = 0;
@@ -59,13 +61,38 @@ function obtenerSinonimos(palabra) {
     const p = normalizar(palabra);
     if (p === "iphone" || p === "apple") return ["iphone", "iph", "apple", "ip"];
     if (p === "samsung") return ["samsung", "sam", "sm"];
-    if (p === "motorola") return ["motorola", "moto"];
-    if (p === "xiaomi") return ["xiaomi", "redmi", "mi", "poco"];
-    if (p === "huawei") return ["huawei", "honor"];
+    if (p === "motorola") return ["motorola", "moto", "mt"];
+    if (p === "xiaomi") return ["xiaomi", "redmi", "mi", "poco", "xi"];
+    if (p === "huawei") return ["huawei", "honor", "hw"];
     if (p === "lg") return ["lg"];
     if (p === "nokia") return ["nokia"];
     if (p === "tcl") return ["tcl"];
+    if (p === "oppo") return ["oppo"];
+    if (p === "realme") return ["realme"];
+    if (p === "infinix") return ["infinix"];
+    if (p === "tecno") return ["tecno"];
+    if (p === "zte") return ["zte", "nubia"];
     return [p];
+}
+
+/**
+ * Regla de calidad:
+ * - Si dice INCELL → INCELL
+ * - Si dice MECANICO / OLED / AMOLED / ORIG / ORIGINAL → ORIGINAL
+ * - Si no dice nada claro → INCELL
+ */
+function detectarCalidad(norm) {
+    if (norm.includes("incell")) return "INCELL";
+    if (
+        norm.includes("mecanico") ||
+        norm.includes("oled") ||
+        norm.includes("amoled") ||
+        norm.includes("orig") ||
+        norm.includes("original")
+    ) {
+        return "ORIGINAL";
+    }
+    return "INCELL";
 }
 
 async function cargarDatosSheets() {
@@ -90,7 +117,6 @@ async function cargarDatosSheets() {
                 Readable.from(csvText)
                     .pipe(csv({ headers: false }))
                     .on("data", row => {
-                        // Mapeo de columnas: A (vacío), B (COD), C (DESCRIPCIÓN), D (PRECIO)
                         const codigo = (row[1] || "").toString().trim();
                         const descripcion = (row[2] || "").toString().trim();
                         const precioStr = row[3] || "0";
@@ -98,25 +124,19 @@ async function cargarDatosSheets() {
                         const precioLimpio = Number(String(precioStr).replace(/[^0-9]/g, ""));
                         const descUpper = descripcion.toUpperCase();
 
-                        // Filtrar encabezados y filas vacías / basura
                         if (
                             precioLimpio > 0 &&
                             descripcion.length > 3 &&
                             !descUpper.includes("PLACAS DE CARGAS") &&
-                            !descUpper.includes("MODULOS SM") &&
                             !descUpper.includes("PRECIO") &&
                             !descUpper.includes("UNIVERSCELL") &&
                             !descUpper.includes("CODIGO") &&
-                            !descUpper.includes("DESCRIPCION")
+                            descUpper !== "MODULOS" &&
+                            descUpper !== "SAMSUNG" &&
+                            !descUpper.startsWith("COD,")
                         ) {
                             const norm = normalizar(descripcion);
-                            const esOriginal =
-                                norm.includes("orig") ||
-                                norm.includes("oled") ||
-                                norm.includes("amoled") ||
-                                norm.includes("super amoled");
-
-                            const calidad = esOriginal ? "ORIGINAL" : "INCELL";
+                            const calidad = detectarCalidad(norm);
 
                             inventarioGlobal.push({
                                 codigo,
@@ -160,7 +180,7 @@ app.post("/api/cotizar", async (req, res) => {
             textoNorm.includes("iph") ||
             textoNorm.includes("apple");
 
-        // ⚡ 1. PIN DE CARGA (DIRECTO)
+        // ⚡ 1. PIN DE CARGA (precio fijo)
         if (tipoServicio === "pin") {
             const precio = esIphone ? 50000 : 30000;
             const modeloFormateado = consulta
@@ -184,7 +204,15 @@ app.post("/api/cotizar", async (req, res) => {
             });
         }
 
-        // 📱 3. BÚSQUEDA EN CATÁLOGO
+        // 🔋 3. BATERÍAS (el proveedor ya no las publica)
+        if (tipoServicio === "bateria") {
+            return res.json({
+                encontrado: false,
+                mensaje: "El proveedor ya no publica baterías en el catálogo automático. Pedí cotización manual o usá tu stock propio."
+            });
+        }
+
+        // 📱 4. BÚSQUEDA DE MÓDULOS / PANTALLAS
         const inventario = await cargarDatosSheets();
         const palabrasBuscadas = textoNorm.split(" ").filter(p => p.length > 0);
 
@@ -192,30 +220,17 @@ app.post("/api/cotizar", async (req, res) => {
             const desc = item.descripcionNorm;
             const descComp = item.descripcionCompacta || "";
 
-            // Filtros de exclusión por tipo de servicio
-            if (tipoServicio === "pantalla") {
-                if (
-                    desc.includes("placa de carga") ||
-                    desc.includes("pin de carga") ||
-                    desc.includes("lente") ||
-                    (desc.includes("bateria") && !desc.includes("modulo"))
-                ) {
-                    return false;
-                }
-            } else if (tipoServicio === "bateria") {
-                if (
-                    !desc.includes("bateria") &&
-                    !desc.includes("pila") &&
-                    !desc.includes("bat") &&
-                    !desc.includes("eb-") &&
-                    !desc.includes("bt-")
-                ) {
-                    return false;
-                }
+            if (
+                desc.includes("placa de carga") ||
+                desc.includes("pin de carga") ||
+                desc.includes("lente") ||
+                desc.includes("bateria") ||
+                desc.includes("flex de power")
+            ) {
+                return false;
             }
 
-            // Búsqueda: todas las palabras (con sinónimos) o coincidencia compacta
-            const coincideCompacto = textoCompacto.length > 3 && descComp.includes(textoCompacto);
+            const coincideCompacto = textoCompacto.length > 2 && descComp.includes(textoCompacto);
             const coincidePalabras =
                 palabrasBuscadas.length > 0 &&
                 palabrasBuscadas.every(palabra => {
@@ -230,19 +245,6 @@ app.post("/api/cotizar", async (req, res) => {
             return res.json({ encontrado: false });
         }
 
-        // BATERÍAS: Mostrar directamente
-        if (tipoServicio === "bateria") {
-            const baterias = coincidencias.slice(0, 8).map(item => ({
-                codigo: item.codigo,
-                repuesto: item.descripcion,
-                precioCliente: calcularPrecio(item.precioBase, esIphone),
-                precioBase: item.precioBase,
-                origen: item.origen
-            }));
-            return res.json({ encontrado: true, esBateria: true, baterias });
-        }
-
-        // MÓDULOS: Separar por calidad
         const originales = [];
         const incell = [];
 
@@ -253,7 +255,8 @@ app.post("/api/cotizar", async (req, res) => {
                 repuesto: item.descripcion,
                 precioCliente,
                 precioBase: item.precioBase,
-                origen: item.origen
+                origen: item.origen,
+                calidad: item.calidad
             };
 
             if (item.calidad === "ORIGINAL") {
@@ -265,8 +268,8 @@ app.post("/api/cotizar", async (req, res) => {
 
         return res.json({
             encontrado: true,
-            originales: originales.slice(0, 8),
-            incell: incell.slice(0, 8)
+            originales: originales.slice(0, 10),
+            incell: incell.slice(0, 10)
         });
     } catch (error) {
         console.error("Error en cotización:", error);
@@ -277,9 +280,13 @@ app.post("/api/cotizar", async (req, res) => {
 app.get("/health", async (req, res) => {
     try {
         const datos = await cargarDatosSheets();
+        const originales = datos.filter(d => d.calidad === "ORIGINAL").length;
+        const incell = datos.filter(d => d.calidad === "INCELL").length;
         res.json({
             status: "OK",
             totalRepuestos: datos.length,
+            originales,
+            incell,
             ultimoUpdate: new Date(lastFetch).toISOString()
         });
     } catch (err) {
