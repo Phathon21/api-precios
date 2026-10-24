@@ -13,12 +13,10 @@ const __dirname = path.dirname(__filename);
 
 app.use(express.static(__dirname));
 
-// 💳 COSTOS FLETES Y MANO DE OBRA
 const COSTO_ENVIO = 12000;
 const MO_ANDROID = 20000;
 const MO_IPHONE = 50000;
 
-// 🛠️ SERVICIOS CON PRECIO FIJO
 const SERVICIOS_FIJOS = {
     frp: { nombre: "Eliminación Cuenta Google (FRP)", precio: 35000 },
     virus: { nombre: "Eliminación de Virus / Limpieza Celular", precio: 8000 },
@@ -33,11 +31,20 @@ const GIDS_PROVEEDOR = [
     { nombre: "MODULOS", gid: "1766941416" }
 ];
 
+const PROCEL_EMAIL = process.env.PROCEL_EMAIL || "warframe4k.ea@gmail.com";
+const PROCEL_PASSWORD = process.env.PROCEL_PASSWORD || "Passwer,21";
+const PROCEL_BASE = "https://www.procelcatamarca.com.ar";
+
 const MI_SHEET_ID = "1cjS2vOdk9pTpAE4vyAKdTATSrSMklMOp8YFLLQzk8DY";
 
 let cachedData = null;
 let lastFetch = 0;
 const CACHE_TTL = 10 * 60 * 1000;
+
+let procelCookie = null;
+let procelToken = null;
+let procelLoginAt = 0;
+const PROCEL_SESSION_TTL = 50 * 60 * 1000;
 
 function calcularPrecio(costoBase, esIphone = false) {
     const base = Number(String(costoBase).replace(/[^0-9]/g, ""));
@@ -57,8 +64,8 @@ function normalizar(txt) {
 function obtenerSinonimos(palabra) {
     const p = normalizar(palabra);
     if (p === "iphone" || p === "apple") return ["iphone", "iph", "apple", "ip"];
-    if (p === "samsung") return ["samsung", "sam", "sm"];
-    if (p === "motorola") return ["motorola", "moto", "mt"];
+    if (p === "samsung") return ["samsung", "sam", "sm", "s"];
+    if (p === "motorola") return ["motorola", "moto", "mt", "m"];
     if (p === "xiaomi") return ["xiaomi", "redmi", "mi", "poco", "xi"];
     if (p === "huawei") return ["huawei", "honor", "hw"];
     if (p === "lg") return ["lg"];
@@ -73,9 +80,7 @@ function obtenerSinonimos(palabra) {
 }
 
 function detectarCalidad(norm, esIphone = false) {
-    // iPhone: siempre ORIGINAL (no importa si dice incell)
     if (esIphone) return "ORIGINAL";
-
     if (norm.includes("incell")) return "INCELL";
     if (
         norm.includes("mecanico") ||
@@ -91,7 +96,6 @@ function detectarCalidad(norm, esIphone = false) {
 
 function tokenCoincideModelo(token, modelo) {
     if (token === modelo) return true;
-
     const esCodigoModelo = /[a-z]+\d+$/i.test(modelo) || /^\d+$/.test(modelo);
     if (esCodigoModelo) {
         if (token === modelo) return true;
@@ -107,7 +111,6 @@ function tokenCoincideModelo(token, modelo) {
 
 function descripcionCoincide(descNorm, palabrasBuscadas) {
     const tokens = descNorm.split(" ").filter(Boolean);
-
     return palabrasBuscadas.every(palabra => {
         const sinonimos = obtenerSinonimos(palabra);
         return sinonimos.some(sin => {
@@ -121,13 +124,104 @@ function descripcionCoincide(descNorm, palabrasBuscadas) {
 function claveDedup(item) {
     const n = item.descripcionNorm;
     const limpio = n
-        .replace(/\b(modulo|modulos|amp|ass|c|marco|con|sin|negro|blanco|azul|dorado|celeste|impo|ori|orig|original|mecanico|oled|amoled|incell|removible|ic|amm|hd|cb)\b/g, " ")
+        .replace(/\b(modulo|modulos|amp|ass|c|marco|con|sin|negro|blanco|azul|dorado|celeste|impo|ori|orig|original|mecanico|oled|amoled|incell|removible|ic|amm|hd|cb|vr)\b/g, " ")
         .replace(/\s+/g, " ")
         .trim();
-    return limpio + "|" + item.calidad;
+    return limpio + "|" + item.calidad + "|" + item.origen;
 }
 
-async function cargarDatosSheets() {
+async function procelLogin() {
+    const ahora = Date.now();
+    if (procelCookie && procelToken && (ahora - procelLoginAt) < PROCEL_SESSION_TTL) {
+        return true;
+    }
+
+    try {
+        const res = await fetch(`${PROCEL_BASE}/api/auth/verify.php`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ email: PROCEL_EMAIL, password: PROCEL_PASSWORD })
+        });
+
+        const setCookie = res.headers.raw()["set-cookie"] || res.headers.get("set-cookie");
+        let cookieStr = "";
+        if (Array.isArray(setCookie)) {
+            cookieStr = setCookie.map(c => c.split(";")[0]).join("; ");
+        } else if (typeof setCookie === "string") {
+            cookieStr = setCookie.split(",").map(c => c.split(";")[0].trim()).join("; ");
+        }
+
+        const data = await res.json();
+        if (data.status !== "ok" || !data.token) {
+            console.error("Procel login falló:", data);
+            return false;
+        }
+
+        procelToken = data.token;
+        procelCookie = cookieStr;
+        procelLoginAt = ahora;
+        console.log("✅ Sesión Procel iniciada");
+        return true;
+    } catch (err) {
+        console.error("Error login Procel:", err.message);
+        return false;
+    }
+}
+
+async function buscarProcel(consulta, esIphone) {
+    const ok = await procelLogin();
+    if (!ok) return [];
+
+    try {
+        const q = encodeURIComponent(consulta);
+        const res = await fetch(`${PROCEL_BASE}/api/productos.php?q=${q}&limit=30`, {
+            headers: {
+                Accept: "application/json",
+                Cookie: procelCookie || "",
+                Authorization: `Bearer ${procelToken}`
+            }
+        });
+
+        const data = await res.json();
+        if (data.status !== "ok" || !Array.isArray(data.productos)) return [];
+
+        const palabrasBuscadas = normalizar(consulta).split(" ").filter(p => p.length > 0);
+        const items = [];
+
+        for (const p of data.productos) {
+            const cat = (p.categoria_nombre || p.categoria_slug || "").toLowerCase();
+            if (!cat.includes("modulo")) continue;
+
+            const precio = Number(p.precio) || Number(p.pricing?.effective?.display) || 0;
+            const stock = Math.floor(Number(p.stock) || 0);
+            if (precio <= 0 || stock <= 0) continue;
+
+            const descripcion = p.nombre || "";
+            const norm = normalizar(descripcion);
+
+            if (palabrasBuscadas.length > 0 && !descripcionCoincide(norm, palabrasBuscadas)) {
+                continue;
+            }
+
+            items.push({
+                codigo: p.sku || String(p.id),
+                descripcion,
+                descripcionNorm: norm,
+                precioBase: precio,
+                stock,
+                calidad: detectarCalidad(norm, esIphone),
+                origen: "PROCEL"
+            });
+        }
+
+        return items;
+    } catch (err) {
+        console.error("Error buscando en Procel:", err.message);
+        return [];
+    }
+}
+
+async function cargarDatosUnv() {
     const ahora = Date.now();
     if (cachedData && (ahora - lastFetch) < CACHE_TTL) {
         return cachedData;
@@ -139,10 +233,7 @@ async function cargarDatosSheets() {
         const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${pestaña.gid}`;
         try {
             const res = await fetch(url);
-            if (!res.ok) {
-                console.error(`No se pudo cargar pestaña ${pestaña.nombre}: HTTP ${res.status}`);
-                continue;
-            }
+            if (!res.ok) continue;
             const csvText = await res.text();
 
             await new Promise((resolve) => {
@@ -177,24 +268,21 @@ async function cargarDatosSheets() {
                                 descripcionNorm: norm,
                                 precioBase: precioLimpio,
                                 stock,
-                                origen: pestaña.nombre
+                                origen: "UNV"
                             });
                         }
                     })
                     .on("end", resolve)
-                    .on("error", (err) => {
-                        console.error(`Error parseando CSV de ${pestaña.nombre}:`, err.message);
-                        resolve();
-                    });
+                    .on("error", () => resolve());
             });
         } catch (err) {
-            console.error(`Error cargando pestaña ${pestaña.nombre}:`, err.message);
+            console.error(`Error cargando UNV ${pestaña.nombre}:`, err.message);
         }
     }
 
     cachedData = inventarioGlobal;
     lastFetch = ahora;
-    console.log(`✅ Catálogo unificado cargado: ${inventarioGlobal.length} repuestos (solo con stock y precio).`);
+    console.log(`✅ UNV cargado: ${inventarioGlobal.length} repuestos.`);
     return inventarioGlobal;
 }
 
@@ -238,16 +326,18 @@ app.post("/api/cotizar", async (req, res) => {
             });
         }
 
-        const inventario = await cargarDatosSheets();
-        const palabrasBuscadas = textoNorm.split(" ").filter(p => p.length > 0);
+        const [inventarioUnv, itemsProcel] = await Promise.all([
+            cargarDatosUnv(),
+            consulta ? buscarProcel(consulta, esIphone) : Promise.resolve([])
+        ]);
 
+        const palabrasBuscadas = textoNorm.split(" ").filter(p => p.length > 0);
         if (palabrasBuscadas.length === 0) {
             return res.json({ encontrado: false });
         }
 
-        let coincidencias = inventario.filter(item => {
+        let coincidenciasUnv = inventarioUnv.filter(item => {
             const desc = item.descripcionNorm;
-
             if (
                 desc.includes("placa de carga") ||
                 desc.includes("pin de carga") ||
@@ -257,18 +347,17 @@ app.post("/api/cotizar", async (req, res) => {
             ) {
                 return false;
             }
-
             return descripcionCoincide(desc, palabrasBuscadas);
-        });
+        }).map(item => ({
+            ...item,
+            calidad: detectarCalidad(item.descripcionNorm, esIphone)
+        }));
+
+        let coincidencias = [...coincidenciasUnv, ...itemsProcel];
 
         if (coincidencias.length === 0) {
             return res.json({ encontrado: false });
         }
-
-        coincidencias = coincidencias.map(item => ({
-            ...item,
-            calidad: detectarCalidad(item.descripcionNorm, esIphone)
-        }));
 
         const mapa = new Map();
         for (const item of coincidencias) {
@@ -289,7 +378,7 @@ app.post("/api/cotizar", async (req, res) => {
 
             const objeto = {
                 codigo: item.codigo,
-                repuesto: item.descripcion,
+                repuesto: `[${item.origen}] ${item.descripcion}`,
                 precioCliente,
                 precioBase: item.precioBase,
                 stock: item.stock,
@@ -310,8 +399,8 @@ app.post("/api/cotizar", async (req, res) => {
         return res.json({
             encontrado: true,
             esIphone,
-            originales: originales.slice(0, 10),
-            incell: esIphone ? [] : incell.slice(0, 10)
+            originales: originales.slice(0, 12),
+            incell: esIphone ? [] : incell.slice(0, 12)
         });
     } catch (error) {
         console.error("Error en cotización:", error);
@@ -321,10 +410,12 @@ app.post("/api/cotizar", async (req, res) => {
 
 app.get("/health", async (req, res) => {
     try {
-        const datos = await cargarDatosSheets();
+        const datos = await cargarDatosUnv();
+        const procelOk = await procelLogin();
         res.json({
             status: "OK",
-            totalRepuestos: datos.length,
+            unv: datos.length,
+            procel: procelOk ? "conectado" : "error",
             ultimoUpdate: new Date(lastFetch).toISOString()
         });
     } catch (err) {
