@@ -1,0 +1,17 @@
+envVarGroups:
+  - name: ea-informatica-secrets
+    envVars:
+      - key: PROCEL_EMAIL
+        sync: false
+      - key: PROCEL_PASSWORD
+        sync: false
+
+services:
+  - type: web
+    name: Web EA
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - fromGroup: ea-informatica-secrets
