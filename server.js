@@ -27,9 +27,9 @@ const SERVICIOS_FIJOS = {
     office: { nombre: "Instalación Paquete Office (PC)", precio: 15000 }
 };
 
-// 📁 GOOGLE SHEETS DE UNV (SOLO PESTAÑA MODULOS)
+// 📁 GOOGLE SHEETS DE UNV (Pestaña Módulos)
 const SHEET_ID = "17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC"; 
-const GID_MODULOS = "1868161265"; // Pestaña Módulos
+const GID_MODULOS = "1868161265"; 
 
 let cachedData = null;
 let lastFetch = 0;
@@ -51,7 +51,6 @@ function normalizar(txt) {
         .replace(/\s+/g, " ");
 }
 
-// 🔍 TRADUCTOR DE MARCAS Y ALIAS
 function obtenerSinonimos(palabra) {
     const p = normalizar(palabra);
     if (p === "iphone" || p === "apple") return ["iphone", "iph", "apple"];
@@ -89,7 +88,6 @@ async function cargarDatosSheets() {
                         // SOLO REGISTROS CON PRECIO BASE VÁLIDO (> 0)
                         if (descripcion.length > 3 && precioLimpio > 0 && !descUpper.includes("PRECIO") && !descUpper.includes("MODULOS SM")) {
                             
-                            // Clasificación de Calidad
                             const norm = normalizar(descripcion);
                             const esOriginal = norm.includes("orig") || norm.includes("oled") || norm.includes("amoled");
                             const calidad = esOriginal ? "ORIGINAL" : "INCELL";
@@ -113,7 +111,7 @@ async function cargarDatosSheets() {
 
     cachedData = inventarioGlobal;
     lastFetch = ahora;
-    console.log(`✅ Catálogo de Módulos actualizado: ${inventarioGlobal.length} repuestos con precio.`);
+    console.log(`✅ Base de datos cargada: ${inventarioGlobal.length} repuestos.`);
     return inventarioGlobal;
 }
 
@@ -127,7 +125,7 @@ app.post("/api/cotizar", async (req, res) => {
         const textoNorm = normalizar(consulta || "");
         const esIphone = textoNorm.includes("iphone") || textoNorm.includes("iph") || textoNorm.includes("apple");
 
-        // ⚡ 1. PIN DE CARGA (DIRECTO SIN PROVEEDOR)
+        // ⚡ 1. PIN DE CARGA (DIRECTO)
         if (tipoServicio === "pin") {
             const precio = esIphone ? 50000 : 30000;
             const modeloFormateado = consulta ? consulta.toUpperCase() : (esIphone ? "iPhone" : "Android");
@@ -147,14 +145,30 @@ app.post("/api/cotizar", async (req, res) => {
             });
         }
 
-        // 📱 3. BÚSQUEDA DE MÓDULOS
+        // 📱 3. BÚSQUEDA DE MÓDULOS / PANTALLAS Y BATERÍAS
         const inventario = await cargarDatosSheets();
         const palabrasBuscadas = textoNorm.split(" ").filter(p => p.length > 0);
 
         const coincidencias = inventario.filter(item => {
+            const desc = item.descripcionNorm;
+
+            // 🚫 FILTRO DE EXCLUSIÓN ESTRICTO SEGÚN TIPO
+            if (tipoServicio === "pantalla") {
+                // EXCLUIR explícitamente placas, pines, flectores, lentes y baterías
+                if (desc.includes("placa") || desc.includes("pin") || desc.includes("carga") || desc.includes("lente") || desc.includes("bateria")) {
+                    return false;
+                }
+            } else if (tipoServicio === "bateria") {
+                // SOLO incluir si dice batería / pila
+                if (!desc.includes("bateria") && !desc.includes("pila") && !desc.includes("bat")) {
+                    return false;
+                }
+            }
+
+            // Validar coincidencia de palabras clave
             return palabrasBuscadas.every(palabra => {
                 const posiblesSinonimos = obtenerSinonimos(palabra);
-                return posiblesSinonimos.some(sinonimo => item.descripcionNorm.includes(sinonimo));
+                return posiblesSinonimos.some(sinonimo => desc.includes(sinonimo));
             });
         });
 
@@ -162,7 +176,17 @@ app.post("/api/cotizar", async (req, res) => {
             return res.json({ encontrado: false });
         }
 
-        // Separar resultados por calidad (Originales/OLED vs Incell)
+        // Si es búsqueda de Batería, devolver lista simple
+        if (tipoServicio === "bateria") {
+            const baterias = coincidencias.slice(0, 5).map(item => ({
+                codigo: item.codigo,
+                repuesto: item.descripcion,
+                precioCliente: calcularPrecio(item.precioBase, esIphone)
+            }));
+            return res.json({ encontrado: true, esBateria: true, baterias });
+        }
+
+        // Si es Pantallas, separar por calidad
         const originales = [];
         const incell = [];
 
