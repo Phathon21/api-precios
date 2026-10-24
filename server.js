@@ -87,9 +87,7 @@ function detectarCalidad(norm) {
     return "INCELL";
 }
 
-/**
- * Match preciso: "g8" no matchea "g84", "a32" no matchea "a32016"
- */
+/** Match preciso: "g8" no matchea "g84", "a32" no matchea "a32016" */
 function tokenCoincideModelo(token, modelo) {
     if (token === modelo) return true;
 
@@ -99,7 +97,7 @@ function tokenCoincideModelo(token, modelo) {
         if (token.startsWith(modelo)) {
             const resto = token.slice(modelo.length);
             if (resto.length > 0 && /^\d/.test(resto)) return false;
-            return false; // solo token exacto para códigos con números
+            return false;
         }
         return false;
     }
@@ -122,7 +120,7 @@ function descripcionCoincide(descNorm, palabrasBuscadas) {
 function claveDedup(item) {
     const n = item.descripcionNorm;
     const limpio = n
-        .replace(/\b(modulo|modulos|amp|ass|c|marco|con|sin|negro|blanco|azul|dorado|celeste|impo|ori|orig|original|mecanico|oled|amoled|incell|removible|ic|amm)\b/g, " ")
+        .replace(/\b(modulo|modulos|amp|ass|c|marco|con|sin|negro|blanco|azul|dorado|celeste|impo|ori|orig|original|mecanico|oled|amoled|incell|removible|ic|amm|hd|cb)\b/g, " ")
         .replace(/\s+/g, " ")
         .trim();
     return limpio + "|" + item.calidad;
@@ -150,15 +148,20 @@ async function cargarDatosSheets() {
                 Readable.from(csvText)
                     .pipe(csv({ headers: false }))
                     .on("data", row => {
+                        // B=COD, C=DESC, D=PRECIO, E=STOCK
                         const codigo = (row[1] || "").toString().trim();
                         const descripcion = (row[2] || "").toString().trim();
                         const precioStr = row[3] || "0";
+                        const stockStr = row[4] || "0";
 
                         const precioLimpio = Number(String(precioStr).replace(/[^0-9]/g, ""));
+                        const stock = Number(String(stockStr).replace(/[^0-9\-]/g, "")) || 0;
                         const descUpper = descripcion.toUpperCase();
 
+                        // SOLO precio > 0 Y stock > 0
                         if (
                             precioLimpio > 0 &&
+                            stock > 0 &&
                             descripcion.length > 3 &&
                             !descUpper.includes("PLACAS DE CARGAS") &&
                             !descUpper.includes("PRECIO") &&
@@ -176,6 +179,7 @@ async function cargarDatosSheets() {
                                 descripcion,
                                 descripcionNorm: norm,
                                 precioBase: precioLimpio,
+                                stock,
                                 calidad,
                                 origen: pestaña.nombre
                             });
@@ -194,7 +198,7 @@ async function cargarDatosSheets() {
 
     cachedData = inventarioGlobal;
     lastFetch = ahora;
-    console.log(`✅ Catálogo unificado cargado: ${inventarioGlobal.length} repuestos.`);
+    console.log(`✅ Catálogo unificado cargado: ${inventarioGlobal.length} repuestos (solo con stock y precio).`);
     return inventarioGlobal;
 }
 
@@ -281,11 +285,15 @@ app.post("/api/cotizar", async (req, res) => {
 
         coincidencias.forEach(item => {
             const precioCliente = calcularPrecio(item.precioBase, esIphone);
+            // Seguridad extra: no devolver precio 0
+            if (precioCliente <= 0) return;
+
             const objeto = {
                 codigo: item.codigo,
                 repuesto: item.descripcion,
                 precioCliente,
                 precioBase: item.precioBase,
+                stock: item.stock,
                 origen: item.origen,
                 calidad: item.calidad
             };
