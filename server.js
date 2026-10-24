@@ -74,15 +74,17 @@ async function cargarDatosSheets() {
                     .pipe(csv({ headers: false }))
                     .on("data", row => {
                         const codigo = row[1] || "";
-                        const descripcion = row[2] || "";
-                        const precioStr = row[3] || "0";
+                        const descripcion = (row[2] || row[1] || "").toString().trim();
+                        const precioStr = row[3] || row[2] || "0";
 
                         const precioLimpio = Number(String(precioStr).replace(/[^0-9]/g, ""));
+                        const descUpper = descripcion.toUpperCase();
 
-                        if (descripcion.length > 3 && precioLimpio > 500 && !descripcion.includes("PLACAS DE CARGAS") && !descripcion.includes("MODULOS")) {
+                        // Descartar solo filas de encabezados o vacías
+                        if (descripcion.length > 2 && precioLimpio > 500 && descUpper !== "PLACAS DE CARGAS" && descUpper !== "PRECIO" && descUpper !== "DESCRIPCION") {
                             inventarioGlobal.push({
                                 codigo: codigo,
-                                descripcion: descripcion.trim(),
+                                descripcion: descripcion,
                                 descripcionNorm: normalizar(descripcion),
                                 precioBase: precioLimpio,
                                 categoria: pestaña.nombre
@@ -99,7 +101,7 @@ async function cargarDatosSheets() {
 
     cachedData = inventarioGlobal;
     lastFetch = ahora;
-    console.log(`✅ Base de datos actualizada: ${inventarioGlobal.length} repuestos cargados.`);
+    console.log(`✅ Base de datos cargada: ${inventarioGlobal.length} repuestos.`);
     return inventarioGlobal;
 }
 
@@ -133,33 +135,31 @@ app.post("/api/cotizar", async (req, res) => {
             });
         }
 
-        // 📱 3. BUSCADOR DE MÓDULOS / PANTALLAS (FILTRO STRICTO)
+        // 📱 3. BÚSQUEDA DE MÓDULOS / PANTALLAS
         const inventario = await cargarDatosSheets();
         const palabrasClave = textoNorm.split(" ").filter(p => p.length > 0);
 
         const coincidencias = inventario.filter(item => {
             if (tipoServicio === "pantalla") {
-                // SOLO buscar en la pestaña MODULOS
-                if (item.categoria !== "MODULOS") return false;
+                // Solo buscar en categoría MODULOS o repuestos que contengan "modulo"
+                if (item.categoria !== "MODULOS" && !item.descripcionNorm.includes("modulo")) return false;
                 
-                // Descartar palabras no deseadas
-                const desc = item.descripcionNorm;
-                if (desc.includes("placa") || desc.includes("flex") || desc.includes("lente") || desc.includes("pin") || desc.includes("bateria")) {
-                    return false;
-                }
+                // Descartar expresamente placas de carga completas si se busca pantalla
+                if (item.descripcionNorm.includes("placa de carga")) return false;
             }
 
+            // Validar que todas las palabras buscadas estén en la descripción
             return palabrasClave.every(palabra => item.descripcionNorm.includes(palabra));
         });
 
         if (coincidencias.length === 0) {
             return res.json({
                 encontrado: false,
-                mensaje: "No se encontró el módulo en el catálogo automático."
+                mensaje: "No se encontró el repuesto en el catálogo automático."
             });
         }
 
-        const resultados = coincidencias.slice(0, 6).map(item => {
+        const resultados = coincidencias.slice(0, 8).map(item => {
             const precioCliente = calcularPrecio(item.precioBase, esIphone);
             return {
                 codigo: item.codigo,
