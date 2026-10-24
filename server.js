@@ -28,16 +28,16 @@ const SERVICIOS_FIJOS = {
 };
 
 // 📁 GOOGLE SHEETS DE UNV (TODAS LAS PESTAÑAS)
-const SHEET_ID = "17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC"; 
+const SHEET_ID = "17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC";
 const GIDS_PROVEEDOR = [
-    { nombre: "MODULOS MECANICO", gid: "0" }, // Pestaña 1
-    { nombre: "MODULOS", gid: "1868161265" }, // Pestaña 2
-    { nombre: "PLACAS Y LENTES", gid: "785555649" } // Pestaña 3
+    { nombre: "MODULOS MECANICO", gid: "0" },
+    { nombre: "MODULOS", gid: "1868161265" },
+    { nombre: "PLACAS Y LENTES", gid: "785555649" }
 ];
 
 let cachedData = null;
 let lastFetch = 0;
-const CACHE_TTL = 10 * 60 * 1000;
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutos
 
 function calcularPrecio(costoBase, esIphone = false) {
     const base = Number(String(costoBase).replace(/[^0-9]/g, ""));
@@ -61,6 +61,10 @@ function obtenerSinonimos(palabra) {
     if (p === "samsung") return ["samsung", "sam", "sm"];
     if (p === "motorola") return ["motorola", "moto"];
     if (p === "xiaomi") return ["xiaomi", "redmi", "mi", "poco"];
+    if (p === "huawei") return ["huawei", "honor"];
+    if (p === "lg") return ["lg"];
+    if (p === "nokia") return ["nokia"];
+    if (p === "tcl") return ["tcl"];
     return [p];
 }
 
@@ -76,7 +80,10 @@ async function cargarDatosSheets() {
         const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${pestaña.gid}`;
         try {
             const res = await fetch(url);
-            if (!res.ok) continue;
+            if (!res.ok) {
+                console.error(`No se pudo cargar pestaña ${pestaña.nombre}: HTTP ${res.status}`);
+                continue;
+            }
             const csvText = await res.text();
 
             await new Promise((resolve) => {
@@ -84,32 +91,49 @@ async function cargarDatosSheets() {
                     .pipe(csv({ headers: false }))
                     .on("data", row => {
                         // Mapeo de columnas: A (vacío), B (COD), C (DESCRIPCIÓN), D (PRECIO)
-                        const codigo = row[1] || "";
+                        const codigo = (row[1] || "").toString().trim();
                         const descripcion = (row[2] || "").toString().trim();
                         const precioStr = row[3] || "0";
 
                         const precioLimpio = Number(String(precioStr).replace(/[^0-9]/g, ""));
                         const descUpper = descripcion.toUpperCase();
 
-                        // Filtrar encabezados y filas vacías
-                        if (telefono > 0 && descripcion.length > 3 && !descUpper.includes("PLACAS DE CARGAS") && !descUpper.includes("MODULOS SM") && !descUpper.includes("PRECIO") && !descUpper.includes("UNIVERSCELL")) {
-                            
+                        // Filtrar encabezados y filas vacías / basura
+                        if (
+                            precioLimpio > 0 &&
+                            descripcion.length > 3 &&
+                            !descUpper.includes("PLACAS DE CARGAS") &&
+                            !descUpper.includes("MODULOS SM") &&
+                            !descUpper.includes("PRECIO") &&
+                            !descUpper.includes("UNIVERSCELL") &&
+                            !descUpper.includes("CODIGO") &&
+                            !descUpper.includes("DESCRIPCION")
+                        ) {
                             const norm = normalizar(descripcion);
-                            const esOriginal = norm.includes("orig") || norm.includes("oled") || norm.includes("amoled");
+                            const esOriginal =
+                                norm.includes("orig") ||
+                                norm.includes("oled") ||
+                                norm.includes("amoled") ||
+                                norm.includes("super amoled");
+
                             const calidad = esOriginal ? "ORIGINAL" : "INCELL";
 
                             inventarioGlobal.push({
-                                codigo: codigo,
-                                descripcion: descripcion,
+                                codigo,
+                                descripcion,
                                 descripcionNorm: norm,
+                                descripcionCompacta: norm.replace(/\s+/g, ""),
                                 precioBase: precioLimpio,
-                                calidad: calidad,
+                                calidad,
                                 origen: pestaña.nombre
                             });
                         }
                     })
                     .on("end", resolve)
-                    .on("error", () => resolve());
+                    .on("error", (err) => {
+                        console.error(`Error parseando CSV de ${pestaña.nombre}:`, err.message);
+                        resolve();
+                    });
             });
         } catch (err) {
             console.error(`Error cargando pestaña ${pestaña.nombre}:`, err.message);
@@ -131,12 +155,19 @@ app.post("/api/cotizar", async (req, res) => {
         const { consulta, tipoServicio } = req.body;
         const textoNorm = normalizar(consulta || "");
         const textoCompacto = textoNorm.replace(/\s+/g, "");
-        const esIphone = textoNorm.includes("iphone") || textoNorm.includes("iph") || textoNorm.includes("apple");
+        const esIphone =
+            textoNorm.includes("iphone") ||
+            textoNorm.includes("iph") ||
+            textoNorm.includes("apple");
 
         // ⚡ 1. PIN DE CARGA (DIRECTO)
         if (tipoServicio === "pin") {
             const precio = esIphone ? 50000 : 30000;
-            const modeloFormateado = consulta ? consulta.toUpperCase() : (esIphone ? "iPhone" : "Android");
+            const modeloFormateado = consulta
+                ? consulta.toUpperCase()
+                : esIphone
+                ? "iPhone"
+                : "Android";
             return res.json({
                 tipo: "servicio_fijo",
                 servicio: `Cambio de Pin de Carga (${modeloFormateado})`,
@@ -158,26 +189,39 @@ app.post("/api/cotizar", async (req, res) => {
         const palabrasBuscadas = textoNorm.split(" ").filter(p => p.length > 0);
 
         const coincidencias = inventario.filter(item => {
-            const desc = item.descriptionNorm;
-            const descComp = item.descriptionCompacta;
+            const desc = item.descripcionNorm;
+            const descComp = item.descripcionCompacta || "";
 
-            // Filtros de exclusión
+            // Filtros de exclusión por tipo de servicio
             if (tipoServicio === "pantalla") {
-                if (desc.includes("placa de carga") || desc.includes("pin de carga") || desc.includes("lente") || (desc.includes("bateria") && !desc.includes("modulo"))) {
+                if (
+                    desc.includes("placa de carga") ||
+                    desc.includes("pin de carga") ||
+                    desc.includes("lente") ||
+                    (desc.includes("bateria") && !desc.includes("modulo"))
+                ) {
                     return false;
                 }
             } else if (tipoServicio === "bateria") {
-                if (!desc.includes("bateria") && !desc.includes("pila") && !desc.includes("bat") && !desc.includes("eb-") && !desc.includes("bt-")) {
+                if (
+                    !desc.includes("bateria") &&
+                    !desc.includes("pila") &&
+                    !desc.includes("bat") &&
+                    !desc.includes("eb-") &&
+                    !desc.includes("bt-")
+                ) {
                     return false;
                 }
             }
 
-            // Búsqueda por coincidencia exacta o por palabras clave
-            const coincideCompacto = descComp.includes(textoCompacto);
-            const coincidePalabras = palabrasBuscadas.every(palabra => {
-                const posiblesSinonimos = obtenerSinonimos(palabra);
-                return posiblesSinonimos.some(sinonimo => desc.includes(sinonimo));
-            });
+            // Búsqueda: todas las palabras (con sinónimos) o coincidencia compacta
+            const coincideCompacto = textoCompacto.length > 3 && descComp.includes(textoCompacto);
+            const coincidePalabras =
+                palabrasBuscadas.length > 0 &&
+                palabrasBuscadas.every(palabra => {
+                    const posiblesSinonimos = obtenerSinonimos(palabra);
+                    return posiblesSinonimos.some(sinonimo => desc.includes(sinonimo));
+                });
 
             return coincidePalabras || coincideCompacto;
         });
@@ -188,10 +232,12 @@ app.post("/api/cotizar", async (req, res) => {
 
         // BATERÍAS: Mostrar directamente
         if (tipoServicio === "bateria") {
-            const baterias = coincidencias.slice(0, 6).map(item => ({
+            const baterias = coincidencias.slice(0, 8).map(item => ({
                 codigo: item.codigo,
-                repuesto: item.description,
-                precioCliente: calcularPrecio(item.precioBase, esIphone)
+                repuesto: item.descripcion,
+                precioCliente: calcularPrecio(item.precioBase, esIphone),
+                precioBase: item.precioBase,
+                origen: item.origen
             }));
             return res.json({ encontrado: true, esBateria: true, baterias });
         }
@@ -204,8 +250,10 @@ app.post("/api/cotizar", async (req, res) => {
             const precioCliente = calcularPrecio(item.precioBase, esIphone);
             const objetoResultado = {
                 codigo: item.codigo,
-                repuesto: item.description,
-                precioCliente: precioCliente
+                repuesto: item.descripcion,
+                precioCliente,
+                precioBase: item.precioBase,
+                origen: item.origen
             };
 
             if (item.calidad === "ORIGINAL") {
@@ -217,10 +265,9 @@ app.post("/api/cotizar", async (req, res) => {
 
         return res.json({
             encontrado: true,
-            originales: originales.slice(0, 6),
-            incell: incell.slice(0, 6)
+            originales: originales.slice(0, 8),
+            incell: incell.slice(0, 8)
         });
-
     } catch (error) {
         console.error("Error en cotización:", error);
         res.status(500).json({ error: "Error interno del servidor" });
@@ -228,8 +275,16 @@ app.post("/api/cotizar", async (req, res) => {
 });
 
 app.get("/health", async (req, res) => {
-    const datos = await cargarDatosSheets();
-    res.json({ status: "OK", totalRepuestos: datos.length, ultimoUpdate: new Date(lastFetch) });
+    try {
+        const datos = await cargarDatosSheets();
+        res.json({
+            status: "OK",
+            totalRepuestos: datos.length,
+            ultimoUpdate: new Date(lastFetch).toISOString()
+        });
+    } catch (err) {
+        res.status(500).json({ status: "ERROR", message: err.message });
+    }
 });
 
 const PORT = process.env.PORT || 3000;
