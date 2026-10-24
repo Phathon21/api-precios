@@ -9,7 +9,7 @@
 </head>
 <body class="bg-slate-100 font-sans text-slate-800 antialiased">
 
-    <!-- ENCABEZADO CON LOGO Y TÍTULOS GRANDES -->
+    <!-- ENCABEZADO CON LOGO -->
     <header class="bg-blue-600 text-white p-5 shadow-lg text-center sticky top-0 z-50">
         <div class="flex items-center justify-center gap-3">
             <img src="logo.jpg" alt="Logo" class="h-12 w-12 rounded-full border-2 border-white object-cover shadow" onerror="this.style.display='none'">
@@ -20,11 +20,11 @@
 
     <main class="max-w-md mx-auto p-4 pb-32">
 
-        <!-- 1. MENÚ PRINCIPAL (BOTONES GRANDES Y CENTRADOS) -->
+        <!-- 1. MENÚ PRINCIPAL (CUADRÍCULA DE 4 BOTONES) -->
         <section class="bg-white rounded-2xl shadow-sm p-5 mb-4 text-center">
             <h2 class="text-sm font-extrabold text-gray-500 uppercase tracking-wider mb-4">¿Qué reparación necesitas?</h2>
             
-            <div class="grid grid-cols-3 gap-3">
+            <div class="grid grid-cols-2 gap-3">
                 <button onclick="seleccionarPrincipal('pantalla')" id="btn-pantalla" class="option-btn border-2 border-slate-200 rounded-xl p-3 text-center hover:border-blue-500 transition shadow-sm">
                     <i class="fa-solid fa-mobile-retro text-3xl text-blue-600 mb-2 block"></i>
                     <div class="text-xs font-black text-slate-700">Módulos / Pantallas</div>
@@ -33,6 +33,11 @@
                 <button onclick="seleccionarPrincipal('pin')" id="btn-pin" class="option-btn border-2 border-slate-200 rounded-xl p-3 text-center hover:border-blue-500 transition shadow-sm">
                     <i class="fa-solid fa-plug-circle-bolt text-3xl text-amber-500 mb-2 block"></i>
                     <div class="text-xs font-black text-slate-700">Pin de Carga</div>
+                </button>
+
+                <button onclick="seleccionarPrincipal('bateria')" id="btn-bateria" class="option-btn border-2 border-slate-200 rounded-xl p-3 text-center hover:border-blue-500 transition shadow-sm">
+                    <i class="fa-solid fa-battery-full text-3xl text-red-500 mb-2 block"></i>
+                    <div class="text-xs font-black text-slate-700">Baterías</div>
                 </button>
 
                 <button onclick="seleccionarPrincipal('servicios')" id="btn-servicios" class="option-btn border-2 border-slate-200 rounded-xl p-3 text-center hover:border-blue-500 transition shadow-sm">
@@ -99,7 +104,7 @@
         <section id="sec-resultados" class="bg-white rounded-2xl shadow-sm p-5 mb-4 hidden">
             <h2 class="text-xs font-extrabold text-gray-500 uppercase tracking-wider mb-3 text-center">Opciones Disponibles:</h2>
 
-            <!-- TABS CALIDAD -->
+            <!-- TABS CALIDAD (SOLO MÓDULOS) -->
             <div id="tabs-calidad" class="grid grid-cols-2 gap-2 mb-4 hidden">
                 <button onclick="cambiarTabCalidad('original')" id="tab-orig" class="py-2.5 px-3 rounded-xl text-xs font-extrabold border-2 border-emerald-500 bg-emerald-50 text-emerald-800 transition">
                     🏆 Original / OLED
@@ -165,7 +170,7 @@
     </div>
 
     <script>
-        const MI_WHATSAPP = "5493834123456"; // Cambia este número por el tuyo
+        const MI_WHATSAPP = "5493834123456"; // Tu número con código de país
 
         let modoActual = '';
         let opcionSeleccionada = null;
@@ -184,10 +189,13 @@
             document.getElementById('bar-bottom').classList.add('hidden');
 
             if (tipo === 'pantalla') {
-                document.getElementById('titulo-modelo').innerText = "Ingresa modelo del celular:";
+                document.getElementById('titulo-modelo').innerText = "Ingresa modelo del celular para pantalla:";
                 document.getElementById('sec-modelo').classList.remove('hidden');
             } else if (tipo === 'pin') {
                 document.getElementById('titulo-modelo').innerText = "Ingresa modelo del celular para Pin de Carga:";
+                document.getElementById('sec-modelo').classList.remove('hidden');
+            } else if (tipo === 'bateria') {
+                document.getElementById('titulo-modelo').innerText = "Ingresa modelo del celular para Batería:";
                 document.getElementById('sec-modelo').classList.remove('hidden');
             } else if (tipo === 'servicios') {
                 document.getElementById('sec-sub-servicios').classList.remove('hidden');
@@ -235,9 +243,21 @@
                 document.getElementById('tabs-calidad').classList.add('hidden');
                 document.getElementById('cartel-garantia').classList.add('hidden');
                 document.getElementById('lista-opciones').innerHTML = `
-                    <p class="text-xs text-red-500 font-extrabold p-2 text-center">❌ No encontramos este modelo en el catálogo automático. Podés confirmar para pedir cotización manual.</p>`;
+                    <p class="text-xs text-red-500 font-extrabold p-2 text-center">❌ No encontramos este repuesto en catálogo automático. Podés confirmar para pedir cotización manual a un técnico.</p>`;
                 opcionSeleccionada = { repuesto: `Cotización Manual (${modelo})`, precio: 0 };
                 actualizarBarra(0);
+                document.getElementById('sec-resultados').classList.remove('hidden');
+                return;
+            }
+
+            // Si es batería, renderizar directo
+            if (data.esBateria) {
+                document.getElementById('tabs-calidad').classList.add('hidden');
+                const cartel = document.getElementById('cartel-garantia');
+                cartel.classList.remove('hidden');
+                cartel.className = "mb-4 p-3 rounded-xl text-xs font-black text-center bg-emerald-50 border-2 border-emerald-300 text-emerald-900";
+                cartel.innerHTML = "🔋 Baterías: Incluyen 30 Días de Garantía.";
+                renderizarLista(data.baterias);
                 document.getElementById('sec-resultados').classList.remove('hidden');
                 return;
             }
@@ -247,7 +267,6 @@
 
             document.getElementById('tabs-calidad').classList.remove('hidden');
             
-            // Priorizar pestaña Original si existe, sino Incell
             if (datosOriginales.length > 0) {
                 cambiarTabCalidad('original');
             } else {
