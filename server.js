@@ -27,7 +27,6 @@ const SERVICIOS_FIJOS = {
     office: { nombre: "Instalación Paquete Office (PC)", precio: 15000 }
 };
 
-// 📁 GOOGLE SHEETS DEL PROVEEDOR UNV (solo módulos)
 const SHEET_ID = "17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC";
 const GIDS_PROVEEDOR = [
     { nombre: "MODULOS MECANICO", gid: "785555649" },
@@ -73,7 +72,10 @@ function obtenerSinonimos(palabra) {
     return [p];
 }
 
-function detectarCalidad(norm) {
+function detectarCalidad(norm, esIphone = false) {
+    // iPhone: siempre ORIGINAL (no importa si dice incell)
+    if (esIphone) return "ORIGINAL";
+
     if (norm.includes("incell")) return "INCELL";
     if (
         norm.includes("mecanico") ||
@@ -87,7 +89,6 @@ function detectarCalidad(norm) {
     return "INCELL";
 }
 
-/** Match preciso: "g8" no matchea "g84", "a32" no matchea "a32016" */
 function tokenCoincideModelo(token, modelo) {
     if (token === modelo) return true;
 
@@ -148,7 +149,6 @@ async function cargarDatosSheets() {
                 Readable.from(csvText)
                     .pipe(csv({ headers: false }))
                     .on("data", row => {
-                        // B=COD, C=DESC, D=PRECIO, E=STOCK
                         const codigo = (row[1] || "").toString().trim();
                         const descripcion = (row[2] || "").toString().trim();
                         const precioStr = row[3] || "0";
@@ -158,7 +158,6 @@ async function cargarDatosSheets() {
                         const stock = Number(String(stockStr).replace(/[^0-9\-]/g, "")) || 0;
                         const descUpper = descripcion.toUpperCase();
 
-                        // SOLO precio > 0 Y stock > 0
                         if (
                             precioLimpio > 0 &&
                             stock > 0 &&
@@ -172,15 +171,12 @@ async function cargarDatosSheets() {
                             !descUpper.startsWith("COD,")
                         ) {
                             const norm = normalizar(descripcion);
-                            const calidad = detectarCalidad(norm);
-
                             inventarioGlobal.push({
                                 codigo,
                                 descripcion,
                                 descripcionNorm: norm,
                                 precioBase: precioLimpio,
                                 stock,
-                                calidad,
                                 origen: pestaña.nombre
                             });
                         }
@@ -269,7 +265,11 @@ app.post("/api/cotizar", async (req, res) => {
             return res.json({ encontrado: false });
         }
 
-        // Deduplicar: misma clave → mayor precio
+        coincidencias = coincidencias.map(item => ({
+            ...item,
+            calidad: detectarCalidad(item.descripcionNorm, esIphone)
+        }));
+
         const mapa = new Map();
         for (const item of coincidencias) {
             const key = claveDedup(item);
@@ -285,7 +285,6 @@ app.post("/api/cotizar", async (req, res) => {
 
         coincidencias.forEach(item => {
             const precioCliente = calcularPrecio(item.precioBase, esIphone);
-            // Seguridad extra: no devolver precio 0
             if (precioCliente <= 0) return;
 
             const objeto = {
@@ -310,8 +309,9 @@ app.post("/api/cotizar", async (req, res) => {
 
         return res.json({
             encontrado: true,
+            esIphone,
             originales: originales.slice(0, 10),
-            incell: incell.slice(0, 10)
+            incell: esIphone ? [] : incell.slice(0, 10)
         });
     } catch (error) {
         console.error("Error en cotización:", error);
@@ -322,13 +322,9 @@ app.post("/api/cotizar", async (req, res) => {
 app.get("/health", async (req, res) => {
     try {
         const datos = await cargarDatosSheets();
-        const originales = datos.filter(d => d.calidad === "ORIGINAL").length;
-        const incell = datos.filter(d => d.calidad === "INCELL").length;
         res.json({
             status: "OK",
             totalRepuestos: datos.length,
-            originales,
-            incell,
             ultimoUpdate: new Date(lastFetch).toISOString()
         });
     } catch (err) {
