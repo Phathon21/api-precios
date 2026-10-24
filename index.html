@@ -99,7 +99,7 @@
 
             <div id="tabs-calidad" class="grid grid-cols-2 gap-2 mb-4 hidden">
                 <button onclick="cambiarTabCalidad('original')" id="tab-orig" class="py-2.5 px-3 rounded-xl text-xs font-extrabold border-2 border-emerald-500 bg-emerald-50 text-emerald-800 transition">
-                    🏆 Original / OLED
+                    🏆 Calidad Premium
                 </button>
                 <button onclick="cambiarTabCalidad('incell')" id="tab-incell" class="py-2.5 px-3 rounded-xl text-xs font-extrabold border-2 border-slate-200 text-slate-600 transition">
                     ⚡ Incell (Económica)
@@ -175,6 +175,7 @@
         let datosOriginales = [];
         let datosIncell = [];
         let carrito = [];
+        let opcionesVisibles = [];
 
         function seleccionarPrincipal(tipo) {
             modoActual = tipo;
@@ -239,8 +240,19 @@
             if (!data.encontrado) {
                 document.getElementById('tabs-calidad').classList.add('hidden');
                 document.getElementById('cartel-garantia').classList.add('hidden');
-                document.getElementById('lista-opciones').innerHTML = `
-                    <p class="text-xs text-red-500 font-extrabold p-2 text-center">❌ No encontramos este repuesto en catálogo automático. Podés confirmar para pedir cotización manual a un técnico.</p>`;
+                const lista = document.getElementById('lista-opciones');
+
+                if (data.requiereRed) {
+                    lista.innerHTML = `
+                        <p class="text-xs text-amber-700 font-extrabold p-2 text-center">📱 ${data.mensaje}</p>
+                        <div class="grid grid-cols-2 gap-2 mt-2">
+                            ${data.opcionesRed.map(red => `<button onclick="buscarConRed('${red}')" class="border-2 border-blue-300 rounded-xl p-3 text-sm font-black text-blue-700 hover:bg-blue-50">Versión ${red}</button>`).join('')}
+                        </div>`;
+                } else {
+                    lista.innerHTML = `
+                        <p class="text-xs text-red-500 font-extrabold p-2 text-center">❌ ${data.mensaje || 'No encontramos este repuesto en el catálogo automático.'}</p>`;
+                }
+
                 document.getElementById('btn-otra-reparacion').classList.add('hidden');
                 document.getElementById('sec-resultados').classList.remove('hidden');
                 return;
@@ -257,7 +269,7 @@
                 return;
             }
 
-            datosOriginales = data.originales || [];
+            datosOriginales = data.premium || data.originales || [];
             datosIncell = data.incell || [];
 
             if (data.esIphone) {
@@ -265,7 +277,7 @@
                 const cartel = document.getElementById('cartel-garantia');
                 cartel.classList.remove('hidden');
                 cartel.className = "mb-4 p-3 rounded-xl text-xs font-black text-center bg-emerald-50 border-2 border-emerald-300 text-emerald-900";
-                cartel.innerHTML = "🛡️ iPhone: Siempre módulos Original / OLED · 60 Días de Garantía.";
+                cartel.innerHTML = "🛡️ iPhone: Módulos de Calidad Premium · 60 Días de Garantía.";
                 renderizarLista(datosOriginales);
             } else {
                 document.getElementById('tabs-calidad').classList.remove('hidden');
@@ -277,6 +289,13 @@
             }
 
             document.getElementById('sec-resultados').classList.remove('hidden');
+        }
+
+        function buscarConRed(red) {
+            const input = document.getElementById('input-modelo');
+            const sinRed = input.value.replace(/\b(4g|5g)\b/ig, '').replace(/\s+/g, ' ').trim();
+            input.value = `${sinRed} ${red}`.trim();
+            consultarModelo();
         }
 
         function cambiarTabCalidad(calidad) {
@@ -293,10 +312,10 @@
                 tabIncell.className = "py-2.5 px-3 rounded-xl text-xs font-extrabold border-2 border-slate-200 text-slate-600 transition";
                 
                 cartel.className = "mb-4 p-3 rounded-xl text-xs font-black text-center bg-emerald-50 border-2 border-emerald-300 text-emerald-900";
-                cartel.innerHTML = "🛡️ Módulos Originales / OLED: Incluyen 60 Días de Garantía.";
+                cartel.innerHTML = "🛡️ Módulos de Calidad Premium: Incluyen 60 Días de Garantía.";
 
                 if (datosOriginales.length === 0) {
-                    lista.innerHTML = '<p class="text-xs text-slate-400 font-bold text-center py-2">No hay versión Original/OLED disponible para este modelo.</p>';
+                    lista.innerHTML = '<p class="text-xs text-slate-400 font-bold text-center py-2">No hay versión Premium disponible para este modelo.</p>';
                 } else {
                     renderizarLista(datosOriginales);
                 }
@@ -315,38 +334,46 @@
             }
         }
 
+        function escaparHtml(valor) {
+            return String(valor ?? '').replace(/[&<>\"']/g, caracter => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#039;'
+            }[caracter]));
+        }
+
         function renderizarLista(items) {
             const lista = document.getElementById('lista-opciones');
-            lista.innerHTML = '';
-            items.forEach(item => {
-                const precio = item.precioCliente;
-                const nombre = item.repuesto.replace(/'/g, "\\'");
-                lista.innerHTML += `
-                    <div onclick="agregarAlCarrito('${nombre}', ${precio})" class="card-opcion border-2 border-slate-200 rounded-xl p-3 cursor-pointer hover:border-blue-500 transition bg-white shadow-sm">
-                        <div class="font-extrabold text-xs text-slate-800">${item.repuesto}</div>
+            opcionesVisibles = items;
+            lista.innerHTML = items.map((item, indice) => {
+                const precio = Number(item.precioCliente) || 0;
+                return `
+                    <button type="button" data-opcion-index="${indice}" class="card-opcion w-full text-left border-2 border-slate-200 rounded-xl p-3 cursor-pointer hover:border-blue-500 transition bg-white shadow-sm">
+                        <div class="font-extrabold text-xs text-slate-800">${escaparHtml(item.repuesto || item.nombre)}</div>
                         <div class="text-blue-600 font-black text-sm mt-1">$${precio.toLocaleString('es-AR')}</div>
                         <div class="text-[10px] text-emerald-600 font-bold mt-1">+ Agregar al pedido</div>
-                    </div>`;
+                    </button>`;
+            }).join('');
+
+            lista.querySelectorAll('[data-opcion-index]').forEach(boton => {
+                boton.addEventListener('click', () => agregarAlCarrito(opcionesVisibles[Number(boton.dataset.opcionIndex)]));
             });
             document.getElementById('btn-otra-reparacion').classList.remove('hidden');
         }
 
         function mostrarResultadoUnico(nombre, precio) {
-            const lista = document.getElementById('lista-opciones');
-            const nombreEsc = nombre.replace(/'/g, "\\'");
-            lista.innerHTML = `
-                <div onclick="agregarAlCarrito('${nombreEsc}', ${precio})" class="border-2 border-blue-500 bg-blue-50 rounded-xl p-3 text-center cursor-pointer hover:bg-blue-100 transition">
-                    <div class="font-extrabold text-xs text-slate-800">${nombre}</div>
-                    <div class="text-blue-600 font-black text-base mt-1">$${precio.toLocaleString('es-AR')}</div>
-                    <div class="text-[10px] text-emerald-600 font-bold mt-1">+ Agregar al pedido</div>
-                </div>`;
-            
-            document.getElementById('btn-otra-reparacion').classList.remove('hidden');
+            renderizarLista([{ repuesto: nombre, precioCliente: Number(precio) || 0 }]);
             document.getElementById('sec-resultados').classList.remove('hidden');
         }
 
-        function agregarAlCarrito(nombre, precio) {
-            carrito.push({ repuesto: nombre, precio: precio });
+        function agregarAlCarrito(item) {
+            if (!item) return;
+            carrito.push({
+                repuesto: item.repuesto || item.nombre,
+                precio: Number(item.precioCliente) || 0,
+                cotizacionId: item.cotizacionId || '',
+                calidad: item.calidad || '',
+                marco: item.marco || '',
+                red: item.red || ''
+            });
             renderizarCarrito();
             recalcularTotal();
             document.getElementById('sec-carrito').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -424,7 +451,7 @@
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        function enviarPedido() {
+        async function enviarPedido() {
             const nombre = document.getElementById('cliente-nombre').value.trim();
             if (!nombre) return alert("Por favor escribí tu nombre completo.");
             if (carrito.length === 0) return alert("Agregá al menos una reparación al pedido.");
@@ -433,6 +460,25 @@
             const subtotal = carrito.reduce((s, i) => s + i.precio, 0);
             const desc = obtenerDescuento();
             const total = Math.round(subtotal * (1 - desc));
+
+            let pedidoId = '';
+            try {
+                const respuestaPedido = await fetch('/api/pedidos', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        nombre,
+                        pago,
+                        items: carrito
+                    })
+                });
+                if (respuestaPedido.ok) {
+                    const datosPedido = await respuestaPedido.json();
+                    pedidoId = datosPedido.pedidoId || '';
+                }
+            } catch (error) {
+                console.warn('No se pudo registrar el pedido en el servidor:', error);
+            }
 
             let itemsTexto = carrito.map((item, i) => 
                 `${i + 1}. ${item.repuesto} — $${item.precio.toLocaleString('es-AR')}`
@@ -446,9 +492,10 @@
             }
 
             mensaje += `💰 *Total:* $${total.toLocaleString('es-AR')}\n💳 *Método de Pago:* ${pago}`;
+            if (pedidoId) mensaje += `\n🧾 *N° de pedido:* ${pedidoId}`;
 
-            const url = 5493854416248
-                ? `https://wa.me/${5493854416248}?text=${encodeURIComponent(mensaje)}`
+            const url = MI_WHATSAPP
+                ? `https://wa.me/${MI_WHATSAPP}?text=${encodeURIComponent(mensaje)}`
                 : `https://wa.me/?text=${encodeURIComponent(mensaje)}`;
 
             window.location.href = url;
