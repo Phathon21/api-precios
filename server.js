@@ -27,11 +27,12 @@ const SERVICIOS_FIJOS = {
     office: { nombre: "Instalación Paquete Office (PC)", precio: 15000 }
 };
 
-// 📁 GOOGLE SHEETS DE UNV (Pestañas Módulos Mecánico + Módulos)
+// 📁 GOOGLE SHEETS DE UNV (TODAS LAS PESTAÑAS)
 const SHEET_ID = "17JDlUX3SjoUdT4diUt8FnuWwoACVPQwC"; 
 const GIDS_PROVEEDOR = [
-    { nombre: "MODULOS MECANICO", gid: "0" },
-    { nombre: "MODULOS", gid: "1868161265" }
+    { nombre: "MODULOS MECANICO", gid: "0" }, // Pestaña 1
+    { nombre: "MODULOS", gid: "1868161265" }, // Pestaña 2
+    { nombre: "PLACAS Y LENTES", gid: "785555649" } // Pestaña 3
 ];
 
 let cachedData = null;
@@ -82,6 +83,7 @@ async function cargarDatosSheets() {
                 Readable.from(csvText)
                     .pipe(csv({ headers: false }))
                     .on("data", row => {
+                        // Mapeo de columnas: A (vacío), B (COD), C (DESCRIPCIÓN), D (PRECIO)
                         const codigo = row[1] || "";
                         const descripcion = (row[2] || "").toString().trim();
                         const precioStr = row[3] || "0";
@@ -89,7 +91,8 @@ async function cargarDatosSheets() {
                         const precioLimpio = Number(String(precioStr).replace(/[^0-9]/g, ""));
                         const descUpper = descripcion.toUpperCase();
 
-                        if (descripcion.length > 3 && precioLimpio > 0 && !descUpper.includes("PRECIO") && !descUpper.includes("MODULOS SM") && !descUpper.includes("PLACAS DE CARGAS")) {
+                        // Filtrar encabezados y filas vacías
+                        if (telefono > 0 && descripcion.length > 3 && !descUpper.includes("PLACAS DE CARGAS") && !descUpper.includes("MODULOS SM") && !descUpper.includes("PRECIO") && !descUpper.includes("UNIVERSCELL")) {
                             
                             const norm = normalizar(descripcion);
                             const esOriginal = norm.includes("orig") || norm.includes("oled") || norm.includes("amoled");
@@ -99,7 +102,6 @@ async function cargarDatosSheets() {
                                 codigo: codigo,
                                 descripcion: descripcion,
                                 descripcionNorm: norm,
-                                descripcionCompacta: norm.replace(/\s+/g, ""),
                                 precioBase: precioLimpio,
                                 calidad: calidad,
                                 origen: pestaña.nombre
@@ -116,7 +118,7 @@ async function cargarDatosSheets() {
 
     cachedData = inventarioGlobal;
     lastFetch = ahora;
-    console.log(`✅ Base de datos unificada cargada: ${inventarioGlobal.length} repuestos.`);
+    console.log(`✅ Catálogo unificado cargado: ${inventarioGlobal.length} repuestos.`);
     return inventarioGlobal;
 }
 
@@ -131,7 +133,7 @@ app.post("/api/cotizar", async (req, res) => {
         const textoCompacto = textoNorm.replace(/\s+/g, "");
         const esIphone = textoNorm.includes("iphone") || textoNorm.includes("iph") || textoNorm.includes("apple");
 
-        // ⚡ 1. PIN DE CARGA (PRECIO FIJO)
+        // ⚡ 1. PIN DE CARGA (DIRECTO)
         if (tipoServicio === "pin") {
             const precio = esIphone ? 50000 : 30000;
             const modeloFormateado = consulta ? consulta.toUpperCase() : (esIphone ? "iPhone" : "Android");
@@ -156,23 +158,21 @@ app.post("/api/cotizar", async (req, res) => {
         const palabrasBuscadas = textoNorm.split(" ").filter(p => p.length > 0);
 
         const coincidencias = inventario.filter(item => {
-            const desc = item.descripcionNorm;
-            const descComp = item.descripcionCompacta;
+            const desc = item.descriptionNorm;
+            const descComp = item.descriptionCompacta;
 
-            // 🚫 FILTRO SEGÚN LO SOLICITADO
+            // Filtros de exclusión
             if (tipoServicio === "pantalla") {
-                // Descartar si es placa de carga, lente o batería sola
                 if (desc.includes("placa de carga") || desc.includes("pin de carga") || desc.includes("lente") || (desc.includes("bateria") && !desc.includes("modulo"))) {
                     return false;
                 }
             } else if (tipoServicio === "bateria") {
-                // Para baterías exigimos palabra clave de batería
                 if (!desc.includes("bateria") && !desc.includes("pila") && !desc.includes("bat") && !desc.includes("eb-") && !desc.includes("bt-")) {
                     return false;
                 }
             }
 
-            // Coincidencia por términos o por texto compacto
+            // Búsqueda por coincidencia exacta o por palabras clave
             const coincideCompacto = descComp.includes(textoCompacto);
             const coincidePalabras = palabrasBuscadas.every(palabra => {
                 const posiblesSinonimos = obtenerSinonimos(palabra);
@@ -190,7 +190,7 @@ app.post("/api/cotizar", async (req, res) => {
         if (tipoServicio === "bateria") {
             const baterias = coincidencias.slice(0, 6).map(item => ({
                 codigo: item.codigo,
-                repuesto: item.descripcion,
+                repuesto: item.description,
                 precioCliente: calcularPrecio(item.precioBase, esIphone)
             }));
             return res.json({ encontrado: true, esBateria: true, baterias });
@@ -204,7 +204,7 @@ app.post("/api/cotizar", async (req, res) => {
             const precioCliente = calcularPrecio(item.precioBase, esIphone);
             const objetoResultado = {
                 codigo: item.codigo,
-                repuesto: item.descripcion,
+                repuesto: item.description,
                 precioCliente: precioCliente
             };
 
