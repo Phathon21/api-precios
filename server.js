@@ -34,17 +34,15 @@ const GIDS_PROVEEDOR = [
     { nombre: "MODULOS", gid: "1766941416" }
 ];
 
-// 📁 TU INVENTARIO PROPIO (por ahora vacío, listo para usar después)
 const MI_SHEET_ID = "1cjS2vOdk9pTpAE4vyAKdTATSrSMklMOp8YFLLQzk8DY";
 
 let cachedData = null;
 let lastFetch = 0;
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutos
+const CACHE_TTL = 10 * 60 * 1000;
 
 function calcularPrecio(costoBase, esIphone = false) {
     const base = Number(String(costoBase).replace(/[^0-9]/g, ""));
     if (!base || base <= 0) return 0;
-
     const manoDeObra = esIphone ? MO_IPHONE : MO_ANDROID;
     return Math.round(((base + COSTO_ENVIO) * 2) + manoDeObra);
 }
@@ -75,12 +73,6 @@ function obtenerSinonimos(palabra) {
     return [p];
 }
 
-/**
- * Regla de calidad:
- * - Si dice INCELL → INCELL
- * - Si dice MECANICO / OLED / AMOLED / ORIG / ORIGINAL → ORIGINAL
- * - Si no dice nada claro → INCELL
- */
 function detectarCalidad(norm) {
     if (norm.includes("incell")) return "INCELL";
     if (
@@ -93,6 +85,47 @@ function detectarCalidad(norm) {
         return "ORIGINAL";
     }
     return "INCELL";
+}
+
+/**
+ * Match preciso: "g8" no matchea "g84", "a32" no matchea "a32016"
+ */
+function tokenCoincideModelo(token, modelo) {
+    if (token === modelo) return true;
+
+    const esCodigoModelo = /[a-z]+\d+$/i.test(modelo) || /^\d+$/.test(modelo);
+    if (esCodigoModelo) {
+        if (token === modelo) return true;
+        if (token.startsWith(modelo)) {
+            const resto = token.slice(modelo.length);
+            if (resto.length > 0 && /^\d/.test(resto)) return false;
+            return false; // solo token exacto para códigos con números
+        }
+        return false;
+    }
+    return token.includes(modelo) || modelo.includes(token);
+}
+
+function descripcionCoincide(descNorm, palabrasBuscadas) {
+    const tokens = descNorm.split(" ").filter(Boolean);
+
+    return palabrasBuscadas.every(palabra => {
+        const sinonimos = obtenerSinonimos(palabra);
+        return sinonimos.some(sin => {
+            if (tokens.some(t => tokenCoincideModelo(t, sin))) return true;
+            const partes = descNorm.split(/[\s\/\-]+/);
+            return partes.some(p => tokenCoincideModelo(p, sin));
+        });
+    });
+}
+
+function claveDedup(item) {
+    const n = item.descripcionNorm;
+    const limpio = n
+        .replace(/\b(modulo|modulos|amp|ass|c|marco|con|sin|negro|blanco|azul|dorado|celeste|impo|ori|orig|original|mecanico|oled|amoled|incell|removible|ic|amm)\b/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    return limpio + "|" + item.calidad;
 }
 
 async function cargarDatosSheets() {
@@ -142,7 +175,6 @@ async function cargarDatosSheets() {
                                 codigo,
                                 descripcion,
                                 descripcionNorm: norm,
-                                descripcionCompacta: norm.replace(/\s+/g, ""),
                                 precioBase: precioLimpio,
                                 calidad,
                                 origen: pestaña.nombre
@@ -174,20 +206,16 @@ app.post("/api/cotizar", async (req, res) => {
     try {
         const { consulta, tipoServicio } = req.body;
         const textoNorm = normalizar(consulta || "");
-        const textoCompacto = textoNorm.replace(/\s+/g, "");
         const esIphone =
             textoNorm.includes("iphone") ||
             textoNorm.includes("iph") ||
             textoNorm.includes("apple");
 
-        // ⚡ 1. PIN DE CARGA (precio fijo)
         if (tipoServicio === "pin") {
             const precio = esIphone ? 50000 : 30000;
             const modeloFormateado = consulta
                 ? consulta.toUpperCase()
-                : esIphone
-                ? "iPhone"
-                : "Android";
+                : esIphone ? "iPhone" : "Android";
             return res.json({
                 tipo: "servicio_fijo",
                 servicio: `Cambio de Pin de Carga (${modeloFormateado})`,
@@ -195,7 +223,6 @@ app.post("/api/cotizar", async (req, res) => {
             });
         }
 
-        // ⚡ 2. SERVICIOS FIJOS
         if (SERVICIOS_FIJOS[tipoServicio]) {
             return res.json({
                 tipo: "servicio_fijo",
@@ -204,7 +231,6 @@ app.post("/api/cotizar", async (req, res) => {
             });
         }
 
-        // 🔋 3. BATERÍAS (el proveedor ya no las publica)
         if (tipoServicio === "bateria") {
             return res.json({
                 encontrado: false,
@@ -212,13 +238,15 @@ app.post("/api/cotizar", async (req, res) => {
             });
         }
 
-        // 📱 4. BÚSQUEDA DE MÓDULOS / PANTALLAS
         const inventario = await cargarDatosSheets();
         const palabrasBuscadas = textoNorm.split(" ").filter(p => p.length > 0);
 
-        const coincidencias = inventario.filter(item => {
+        if (palabrasBuscadas.length === 0) {
+            return res.json({ encontrado: false });
+        }
+
+        let coincidencias = inventario.filter(item => {
             const desc = item.descripcionNorm;
-            const descComp = item.descripcionCompacta || "";
 
             if (
                 desc.includes("placa de carga") ||
@@ -230,27 +258,30 @@ app.post("/api/cotizar", async (req, res) => {
                 return false;
             }
 
-            const coincideCompacto = textoCompacto.length > 2 && descComp.includes(textoCompacto);
-            const coincidePalabras =
-                palabrasBuscadas.length > 0 &&
-                palabrasBuscadas.every(palabra => {
-                    const posiblesSinonimos = obtenerSinonimos(palabra);
-                    return posiblesSinonimos.some(sinonimo => desc.includes(sinonimo));
-                });
-
-            return coincidePalabras || coincideCompacto;
+            return descripcionCoincide(desc, palabrasBuscadas);
         });
 
         if (coincidencias.length === 0) {
             return res.json({ encontrado: false });
         }
 
+        // Deduplicar: misma clave → mayor precio
+        const mapa = new Map();
+        for (const item of coincidencias) {
+            const key = claveDedup(item);
+            const actual = mapa.get(key);
+            if (!actual || item.precioBase > actual.precioBase) {
+                mapa.set(key, item);
+            }
+        }
+        coincidencias = Array.from(mapa.values());
+
         const originales = [];
         const incell = [];
 
         coincidencias.forEach(item => {
             const precioCliente = calcularPrecio(item.precioBase, esIphone);
-            const objetoResultado = {
+            const objeto = {
                 codigo: item.codigo,
                 repuesto: item.descripcion,
                 precioCliente,
@@ -260,11 +291,14 @@ app.post("/api/cotizar", async (req, res) => {
             };
 
             if (item.calidad === "ORIGINAL") {
-                originales.push(objetoResultado);
+                originales.push(objeto);
             } else {
-                incell.push(objetoResultado);
+                incell.push(objeto);
             }
         });
+
+        originales.sort((a, b) => a.precioCliente - b.precioCliente);
+        incell.sort((a, b) => a.precioCliente - b.precioCliente);
 
         return res.json({
             encontrado: true,
